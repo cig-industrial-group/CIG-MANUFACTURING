@@ -1,0 +1,151 @@
+# ============================================================
+# CI — CIG-MANUFACTURING (FabriFlow v1.0.0)
+#
+# Pipeline quirúrgico que se ejecuta en cada push a main y PR:
+#   1. Guardia  → typescript.ignoreBuildErrors (y eslint.ignoreDuringBuilds)
+#                 deben estar DESACTIVADOS: las verificaciones del build
+#                 tienen que ser reales.
+#   2. Esquema  → prisma validate + prisma generate.
+#   3. Lint     → ESLint sobre todo el proyecto.
+#   4. Build    → next build con verificación de tipos activa.
+#   5. Tipos    → tsc --noEmit (reporta TODOS los errores, no solo el
+#                 primero como hace next build).
+#   6. Humo     → BD SQLite efímera + semilla + servidor standalone real:
+#                 GET /api, login admin y sesión con cookie firmada.
+#
+# Versión de Bun fijada a la usada en desarrollo (reproducibilidad).
+# ============================================================
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Cancela ejecuciones obsoletas de la misma rama (ahorra minutos)
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Privilegios mínimos: solo lectura del código
+permissions:
+  contents: read
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+  # Secreto efímero exclusivo de pruebas (NO es de producción)
+  AUTH_SECRET: ci-clave-efimera-solo-pruebas
+  PORT: "3100"
+  HOSTNAME: "127.0.0.1"
+
+jobs:
+  ci:
+    name: "Calidad, tipos, build y humo"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: "Descargar código"
+        uses: actions/checkout@v5
+
+      - name: "Instalar Bun 1.3.14"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: "Caché de dependencias de Bun"
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: "Instalar dependencias (lockfile congelado)"
+        run: bun install --frozen-lockfile
+
+      # ── 1. GUARDIA ─────────────────────────────────────────────
+      # Evita que alguien vuelva a ocultar errores del compilador.
+      - name: "Guardia: ignoreBuildErrors debe estar desactivado"
+        run: |
+          if grep -nE 'ignoreBuildErrors[[:space:]]*:[[:space:]]*true' next.config.ts; then
+            echo "::error file=next.config.ts,title=ignoreBuildErrors::typescript.ignoreBuildErrors está en true. Elimínalo para que la verificación de tipos del build sea real."
+            exit 1
+          fi
+          if grep -nE 'ignoreDuringBuilds[[:space:]]*:[[:space:]]*true' next.config.ts; then
+            echo "::error file=next.config.ts,title=ignoreDuringBuilds::eslint.ignoreDuringBuilds está en true. Elimínalo para que el lint del build sea real."
+            exit 1
+          fi
+          echo "OK: ignoreBuildErrors e ignoreDuringBuilds no están habilitados"
+
+      # ── 2. ESQUEMA ─────────────────────────────────────────────
+      - name: "Definir base de datos efímera de pruebas"
+        run: echo "DATABASE_URL=file:${RUNNER_TEMP}/cig-ci.db" >> "$GITHUB_ENV"
+
+      - name: "Esquema Prisma (validate + generate)"
+        run: |
+          bunx prisma validate
+          bunx prisma generate
+
+      # ── 3. LINT ────────────────────────────────────────────────
+      - name: "Lint (ESLint)"
+        run: bun run lint
+
+      # ── 4. BUILD (tipos verificados de verdad) ─────────────────
+      - name: "Build de producción"
+        run: bun run build
+
+      # ── 5. TYPECHECK COMPLETO ──────────────────────────────────
+      # next build se detiene en el primer error; tsc los lista todos.
+      - name: "Typecheck completo (tsc --noEmit)"
+        run: ./node_modules/.bin/tsc --noEmit
+
+      # ── 6. HUMO (servidor real con BD real) ────────────────────
+      - name: "Humo: crear esquema y sembrar datos"
+        run: |
+          bunx prisma db push --skip-generate
+          bun prisma/seed.ts
+
+      - name: "Humo: servidor standalone + API + login + sesión"
+        run: |
+          NODE_ENV=production node .next/standalone/server.js > server-ci.log 2>&1 &
+          PID=$!
+          trap 'kill $PID 2>/dev/null || true' EXIT
+
+          # Esperar el arranque (máx. 60 s)
+          listo=0
+          for i in $(seq 1 60); do
+            if curl -sf "http://127.0.0.1:3100/api" > /dev/null; then listo=1; break; fi
+            sleep 1
+          done
+          if [ "$listo" != "1" ]; then
+            echo "::error::El servidor standalone no arrancó en 60 s"
+            cat server-ci.log
+            exit 1
+          fi
+
+          # a) API viva
+          CUERPO=$(curl -sf "http://127.0.0.1:3100/api")
+          echo "GET /api -> $CUERPO"
+          echo "$CUERPO" | grep -q 'Hello, world!' \
+            || { echo "::error::GET /api no devolvió el cuerpo esperado"; exit 1; }
+
+          # b) Login real contra la BD sembrada
+          LOGIN=$(curl -sf -c /tmp/cookies-ci.txt -X POST "http://127.0.0.1:3100/api/auth/login" \
+            -H "Content-Type: application/json" \
+            -d '{"correo":"admin@fabriflow.com","password":"Admin*2024"}')
+          echo "POST /api/auth/login -> $(echo "$LOGIN" | head -c 200)"
+          echo "$LOGIN" | grep -q '"usuario"' \
+            || { echo "::error::El login no devolvió un usuario"; exit 1; }
+
+          # c) La cookie de sesión firmada (JWT) autentica
+          SESION=$(curl -sf -b /tmp/cookies-ci.txt "http://127.0.0.1:3100/api/auth/sesion")
+          echo "GET /api/auth/sesion -> $(echo "$SESION" | head -c 200)"
+          echo "$SESION" | grep -q 'admin@fabriflow.com' \
+            || { echo "::error::La cookie de sesión no autentica"; exit 1; }
+
+          echo "Humo completo: arranque, API, login y sesión OK"
+
+      - name: "Publicar log del servidor (solo si falló)"
+        if: failure()
+        run: cat server-ci.log 2>/dev/null || true
