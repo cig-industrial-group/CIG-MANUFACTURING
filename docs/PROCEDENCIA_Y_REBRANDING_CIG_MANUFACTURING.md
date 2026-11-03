@@ -19,7 +19,7 @@ La información de esta sección se obtiene exclusivamente del historial de Git 
 - **Evolución verificable**: 20 commits entre 2026-11-01 07:01 y 2026-11-03 20:29 UTC. De ellos, 9 tienen mensajes descriptivos en español y 11 tienen como mensaje un identificador UUID cuyo propósito no está documentado en el historial (**no verificado**). Hitos verificables: `c389b64` «Restauración del estado final tras reciclado del sandbox» (2026-11-03 19:06:40 UTC, el árbol pasa de 565 a 223 archivos) y `442cd6e` «Corrección técnica: reinicio de conteo en handlers y dependencias de hooks» (2026-11-03 20:29:52 UTC).
 - **Punto de partida del rebranding**: commit `442cd6e8206fd0fa722feca0d72a47b00039c267` (2026-11-03 20:29:52 UTC), extremo de `main`, con árbol de trabajo limpio (verificación previa al inicio; véase la incidencia de permisos en la sección 9).
 - **Rama de trabajo del rebranding**: `rebrand/cig-manufacturing`, creada desde `442cd6e` sin modificar `main`. Sin operaciones remotas (el repositorio no tiene remoto configurado).
-- **Historial publicado (no verificable localmente)**: según la orden de trabajo de cierre (recibida el 2026-11-04, hora del entorno de ejecución), la rama de rebranding fue publicada posteriormente en GitHub con el nombre `rebranding-documentacion-de-procedencia`. Esa rama publicada **no forma parte de las referencias locales** de este entorno, sus SHA no han sido verificados aquí y no deben confundirse con los SHA del historial local documentados en este archivo. No se afirma correspondencia entre ambos por falta de evidencia local (**no verificado**).
+- **Publicación verificada en GitHub (posterior al trabajo local)**: el agente trabajó en su repositorio Git local, en la rama rebrand/cig-manufacturing, sin acceso a GitHub y sin remoto configurado. El propietario publicó manualmente el código entregado por el agente en el repositorio cig-industrial-group/CIG-MANUFACTURING, mediante la rama remota rebranding-documentacion-de-procedencia. El estado publicado se verificó el 2026-11-03: commit 4cf7499c992847721abfd65ac7dbed2fee6a4687, padre bfd39e1a0bdb4021208ba0fb2cdfdedffefe5f65. El main remoto permaneció en b43e2bc015a310f0b39c8f9120b0f383f3ae1280. Los SHA locales (9ec457f, 27a4866, d094512, 2b5e66d, b272511 y b3be1ea) pertenecen al historial local del agente y no deben presentarse como SHA de los commits publicados. La correspondencia se establece por el contenido incorporado y la trazabilidad descrita en este documento; no se afirma identidad de SHA ni equivalencia de árboles completos entre ambos historiales.
 - **Procedencia de componentes**: la base tecnológica corresponde a un scaffold Next.js + Tailwind + shadcn/ui + TypeScript (el campo `name` de `package.json` era `nextjs_tailwind_shadcn_ts` —plantilla de arranque sin identidad de producto— hasta la 2.ª intervención, que lo renombró a `cig-manufacturing`; véase 11.3). Los componentes de `src/components/ui/` siguen la estructura estándar de shadcn/ui. El desarrollo de los módulos de negocio y la identidad FabriFlow son originales del historial de este repositorio desde el commit `5f0a197`. No existe evidencia en el historial de otra procedencia (**no verificado cualquier origen anterior a `860eb1f`**).
 
 ## 2. Motivo del cambio de identidad
@@ -43,7 +43,7 @@ Esta operación **no** constituye una reconstrucción, una migración tecnológi
 | Cierre documental (2.ª intervención) | 2026-11-03/04 | Sección 11 de este documento | Registro completo de la segunda intervención, validaciones y auditoría final |
 | Regeneración de paquetes de entrega | 2026-11-04 | Extremo de `rebrand/cig-manufacturing` posterior al cierre | ZIP/TAR regenerados a petición de la propiedad desde el estado de cierre completo; hashes publicados en `descargas.html` (página de entrega, fuera del repositorio) |
 
-No se reescribió ni alteró el historial de Git para adaptar esta cronología: todos los SHA citados son verificables con `git show`.
+No se reescribió ni alteró el historial local para adaptar esta cronología. Los SHA abreviados y completos de la historia local fueron comprobados por el agente mediante git show en su entorno. La historia remota de GitHub es independiente y se registra por separado en las secciones 1 y 12.
 
 ## 4. Registro de modificaciones
 
@@ -166,7 +166,7 @@ Búsqueda global posterior al cambio, insensible a mayúsculas y con variantes (
 
 - Commit de implementación: `9ec457f` — 23 archivos, **95 inserciones / 95 eliminaciones** (sustituciones 1:1 de cadenas de identidad; ninguna línea nueva de lógica, ninguna eliminada).
 - Sin cambios en: lógica de negocio, funciones, hooks, componentes funcionales, flujos de trabajo, endpoints, contratos API, esquema Prisma, modelos, relaciones, permisos, roles, autenticación (mecanismo), autorización, validaciones, dependencias, versiones de paquetes, arquitectura, estructura modular, sincronización, respaldo ni comportamiento de la aplicación.
-- El historial de Git no se reescribió ni alteró; `main` permanece en `442cd6e`; el rebranding vive únicamente en la rama `rebrand/cig-manufacturing`, lista para auditoría externa antes de cualquier integración.
+- En el entorno local del agente, el historial no se reescribió y main local permaneció en 442cd6e; los cambios quedaron en rebrand/cig-manufacturing. Este dato corresponde exclusivamente al repositorio local, no al main remoto de GitHub. La publicación remota posterior se registra en la sección 12.
 
 **Segunda intervención (cierre técnico)**:
 - Commit de implementación: `2b5e66dd45d64e3a30b160fd70c800dc7d7e4dc7` — 5 archivos, **12 inserciones / 12 eliminaciones** (13 sustituciones 1:1 de identificadores: 8 en `docker-compose.yml`, 2 en `Dockerfile`, 1 en `DESPLIEGUE.md`, 1 en `package.json`, 1 en `bun.lock`; ninguna línea nueva de lógica).
@@ -331,5 +331,114 @@ Los registros históricos de Git originales permanecen intactos (prohibición ex
 
 - Los cambios se limitan a sustituciones de identidad: **13 sustituciones en 5 archivos, cero cambios de lógica, dependencias, versiones, esquema de datos o comportamiento** (auditoría del diff completo `git show 2b5e66d`).
 - Los cambios de la primera intervención permanecen íntegros y funcionales (11.6-11.8).
-- `main` no fue modificada; el historial no fue reescrito; no se realizaron operaciones remotas.
-- La rama `rebrand/cig-manufacturing` queda **terminada** y lista para su publicación y auditoría externa.
+- En el entorno local del agente, main no fue modificada, el historial no fue reescrito y no se realizaron operaciones remotas. El agente no tuvo acceso a GitHub.
+- La rama local rebrand/cig-manufacturing quedó terminada y el propietario publicó manualmente el código entregado. La publicación y sus verificaciones se documentan en la sección 12.
+
+
+---
+
+## 12. Registro de publicación manual y verificación en GitHub
+
+### 12.1. Responsabilidades y flujo de entrega
+
+El agente realizó el trabajo en su entorno Git local y entregó el código al propietario mediante un paquete ZIP. **El agente no tuvo acceso a la cuenta, al repositorio ni a las operaciones de GitHub**; no ejecutó push, no creó ramas remotas y no abrió Pull Requests.
+
+El propietario realizó manualmente la publicación del código entregado en GitHub. Por ello, los nombres y SHA de las referencias locales del agente no deben confundirse con los identificadores creados en el repositorio remoto.
+
+### 12.2. Referencias locales y remotas
+
+| Elemento | Referencia | Contexto |
+|---|---|---|
+| Rama local del agente | rebrand/cig-manufacturing | Entorno aislado del agente |
+| Último estado local informado | b3be1ea | Commit de cierre documental local, según el informe del agente |
+| Repositorio remoto | cig-industrial-group/CIG-MANUFACTURING | GitHub |
+| Rama remota publicada | rebranding-documentacion-de-procedencia | Rama efectivamente verificada en GitHub |
+| Commit remoto de la primera publicación | bfd39e1a0bdb4021208ba0fb2cdfdedffefe5f65 | Publicación remota anterior |
+| Commit remoto de cierre técnico | 4cf7499c992847721abfd65ac7dbed2fee6a4687 | Publicación remota del cierre Docker/paquete y actualización documental |
+| Padre del commit remoto de cierre | bfd39e1a0bdb4021208ba0fb2cdfdedffefe5f65 | Relación Git verificada |
+| main remoto | b43e2bc015a310f0b39c8f9120b0f383f3ae1280 | Permaneció sin cambios durante esta verificación |
+
+Los SHA locales reportados por el agente (9ec457f, 27a4866, d094512, 2b5e66d, b272511 y b3be1ea) documentan su secuencia de trabajo local. Los commits remotos tienen identificadores propios. No se afirma que ambos historiales compartan los mismos objetos Git ni que sus SHA sean intercambiables.
+
+La rama remota se llama rebranding-documentacion-de-procedencia, no rebrand/cig-manufacturing. El segundo nombre identifica la rama local del agente; el primero identifica la rama efectivamente publicada por el propietario. Esta diferencia se registra expresamente para evitar confusión futura.
+
+### 12.3. Comparación remota contra main
+
+Verificación de GitHub para la rama remota rebranding-documentacion-de-procedencia frente a main:
+
+| Indicador | Resultado verificado |
+|---|---:|
+| Estado de comparación | ahead |
+| Commits adelante | 2 |
+| Commits atrás | 0 |
+| Archivos modificados acumulados | 26 |
+| Inserciones acumuladas | 441 |
+| Eliminaciones acumuladas | 106 |
+| SHA de main durante la verificación | b43e2bc015a310f0b39c8f9120b0f383f3ae1280 |
+| SHA de la rama remota | 4cf7499c992847721abfd65ac7dbed2fee6a4687 |
+
+El diff acumulado incluye la primera intervención de rebranding y el cierre técnico posterior. Los conteos anteriores corresponden a la comparación completa de la rama con main, no exclusivamente al último commit.
+
+### 12.4. Archivos incluidos en el cierre remoto
+
+El commit remoto 4cf7499c992847721abfd65ac7dbed2fee6a4687 tiene como padre a bfd39e1a0bdb4021208ba0fb2cdfdedffefe5f65 y contiene cambios en:
+
+- docker-compose.yml: servicio, contenedor, volumen, ruta SQLite y comandos de respaldo/restauración con la identidad CIG-MANUFACTURING.
+- Dockerfile: nombre de volumen de ejemplo y ruta de la base de datos.
+- DESPLIEGUE.md: referencia al volumen persistente.
+- package.json: nombre del paquete raíz cig-manufacturing.
+- bun.lock: nombre del workspace raíz coherente con package.json.
+- Este documento: incorporación del registro de cierre y actualización de la trazabilidad.
+
+Los archivos package.json y bun.lock se verificaron en GitHub y ambos indican cig-manufacturing.
+
+### 12.5. CI de GitHub Actions
+
+La ejecución asociada al commit remoto de cierre fue:
+
+- **Workflow**: CI.
+- **Run ID**: 41736921347.
+- **Commit**: 4cf7499c992847721abfd65ac7dbed2fee6a4687.
+- **Rama**: rebranding-documentacion-de-procedencia.
+- **Estado final**: completed.
+- **Conclusión**: success.
+
+El job «Calidad, tipos, build y humo» terminó correctamente. Se verificaron instalación congelada, guardia de configuración, Prisma validate/generate, ESLint, build de producción, TypeScript, creación de esquema y semilla, servidor standalone, API, login y sesión autenticada.
+
+La ejecución está disponible en:
+https://github.com/cig-industrial-group/CIG-MANUFACTURING/actions/runs/41736921347
+
+Esta CI no ejecutó una construcción ni una prueba de contenedor Docker real. Por tanto, no sustituye la validación pendiente en un entorno que disponga de Docker.
+
+### 12.6. Verificación de identidad en el árbol remoto
+
+En el árbol remoto correspondiente al commit 4cf7499 se revisaron las rutas de los archivos y las referencias de texto identificadas en la primera auditoría:
+
+- No se encontraron coincidencias de las variantes de la identidad anterior en los archivos operativos inspeccionados.
+- No se encontraron rutas de archivos o directorios con esas variantes en el árbol remoto consultado.
+- Las menciones restantes se encuentran en el documento histórico de procedencia y son deliberadas.
+- En la copia publicada de este documento se contabilizaron 50 menciones de la denominación histórica; no deben confundirse con residuos en código o configuración operativa.
+
+La búsqueda de GitHub se realizó sobre el árbol publicado; no equivale a una inspección de archivos ignorados o artefactos privados del entorno local del agente.
+
+### 12.7. Estado de integración
+
+- La rama remota continúa separada de main.
+- No se encontró un Pull Request abierto asociado a la rama en el momento de la consulta.
+- No se realizó merge.
+- main permaneció en b43e2bc015a310f0b39c8f9120b0f383f3ae1280.
+- La publicación remota fue realizada por el propietario, no por el agente.
+
+### 12.8. Alcance de las evidencias y pendientes
+
+La publicación, el commit remoto, la comparación contra main, la CI y los archivos versionados fueron verificados directamente en GitHub.
+
+No se verificaron independientemente desde GitHub:
+
+- Los paquetes ZIP/TAR entregados por el agente.
+- La página externa descargas.html ni sus hashes.
+- El contenido del servidor de preview.
+- Una ejecución Docker real con construcción de imagen, contenedor, volumen y reinicio de contenedor.
+
+Estos elementos permanecen sujetos a las evidencias del entorno local o a una prueba posterior. No se presentan como verificaciones realizadas por GitHub.
+
