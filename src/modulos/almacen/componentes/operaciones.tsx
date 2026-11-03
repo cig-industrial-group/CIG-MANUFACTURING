@@ -209,15 +209,12 @@ function FormularioOperacion({ config }: { config: ConfigOperacion }) {
 
   const productoSel = productos?.find((p) => p.id === productoId) ?? null;
 
-  // Al cambiar de producto (unidad base o empaque distintos) el conteo
-  // se reinicia en su forma natural de captura. El ajuste se hace durante
-  // el render (patrón recomendado por React para restablecer estado cuando
-  // cambia otro valor) en vez de dentro de un useEffect, donde el setState
-  // síncrono provoca renders en cascada.
-  const [conteoProductoId, setConteoProductoId] = useState(productoId);
-  if (conteoProductoId !== productoId) {
-    setConteoProductoId(productoId);
-    setConteo(estadoConteoInicial(productoSel));
+  // Al cambiar de producto (unidad base o empaque distintos) el conteo se
+  // reinicia en su forma natural de captura. Ambas actualizaciones ocurren
+  // dentro del mismo evento de selección (React las agrupa en un solo render).
+  function seleccionarProducto(id: string) {
+    setProductoId(id);
+    setConteo(estadoConteoInicial(productos?.find((p) => p.id === id) ?? null));
   }
 
   // Total en unidad base según el modo de captura (directo o paquetes
@@ -405,7 +402,7 @@ function FormularioOperacion({ config }: { config: ConfigOperacion }) {
               <SelectorProducto
                 productos={productosFiltrados}
                 valor={productoId || null}
-                onChange={setProductoId}
+                onChange={seleccionarProducto}
                 stockPorAlmacen={
                   config.requiereOrigen && almacenOrigenId && stockOrigen
                     ? new Map(stockOrigen.map((s) => [s.productoId, s.cantidad]))

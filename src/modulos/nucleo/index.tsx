@@ -6,7 +6,7 @@
  * Controla la sesión: pantalla de acceso, cambio de contraseña obligatorio
  * y menú de usuario con permisos por rol.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { create } from "zustand";
@@ -352,9 +352,15 @@ function ContenidoPrincipal({ permisos }: { permisos: string[] }) {
   const [menuAbierto, setMenuAbierto] = useState(false);
 
   const modulo = MODULOS.find((m) => m.id === moduloId && m.disponible);
-  const secciones = modulo ? seccionesPermitidas(modulo, permisos) : [];
+  // Secciones y módulos visibles derivan de datos estables (MODULOS y los
+  // permisos de la sesión): se memorizan para que los efectos de abajo no
+  // se ejecuten en cada render por cambiar la identidad del array.
+  const secciones = useMemo(
+    () => (modulo ? seccionesPermitidas(modulo, permisos) : []),
+    [modulo, permisos],
+  );
   const seccionDef = secciones.find((s) => s.id === seccion);
-  const visibles = modulosPermitidos(permisos);
+  const visibles = useMemo(() => modulosPermitidos(permisos), [permisos]);
 
   // Si el módulo activo no es visible para el rol, volver al primer módulo permitido
   useEffect(() => {

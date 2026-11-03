@@ -134,17 +134,6 @@ export function Inventario() {
     setAjusteAbierto(true);
   }
 
-  // Al cambiar de producto (unidad base o empaque distintos) el conteo
-  // se reinicia en su forma natural de captura. El ajuste se hace durante
-  // el render (patrón recomendado por React para restablecer estado cuando
-  // cambia otro valor) en vez de dentro de un useEffect, donde el setState
-  // síncrono provoca renders en cascada.
-  const [conteoAjusteProductoId, setConteoAjusteProductoId] = useState(productoAjuste?.id);
-  if (conteoAjusteProductoId !== productoAjuste?.id) {
-    setConteoAjusteProductoId(productoAjuste?.id);
-    setConteoAjuste(estadoConteoInicial(productoAjuste));
-  }
-
   // Total del ajuste en unidad base según el modo de captura (directo o
   // paquetes del EMPAQUE CONFIGURADO DEL PRODUCTO)
   const resultadoConteoAjuste = calcularConteo(conteoAjuste, productoAjuste);
@@ -483,9 +472,14 @@ export function Inventario() {
                 <SelectorProducto
                   productos={(productos ?? []).filter((p) => p.activo)}
                   valor={null}
-                  onChange={(id) =>
-                    setProductoAjuste(productos?.find((p) => p.id === id) ?? null)
-                  }
+                  onChange={(id) => {
+                    // Selección de producto: actualizar producto y reiniciar
+                    // el conteo en el mismo evento (unidad base o empaque del
+                    // producto recién elegido).
+                    const producto = productos?.find((p) => p.id === id) ?? null;
+                    setProductoAjuste(producto);
+                    setConteoAjuste(estadoConteoInicial(producto));
+                  }}
                 />
               )}
             </div>
