@@ -151,7 +151,7 @@ sudo systemctl status cig-manufacturing
 docker compose up -d --build
 ```
 
-Ver `docker-compose.yml`. La base de datos vive en un volumen (`fabriflow-data`)
+Ver `docker-compose.yml`. La base de datos vive en un volumen (`cig-manufacturing-data`)
 y sobrevive a reinicios y reconstrucciones del contenedor.
 
 ## 6. Exponer el servicio (proxy inverso)

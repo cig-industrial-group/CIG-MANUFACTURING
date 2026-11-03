@@ -19,7 +19,8 @@ La información de esta sección se obtiene exclusivamente del historial de Git 
 - **Evolución verificable**: 20 commits entre 2026-11-01 07:01 y 2026-11-03 20:29 UTC. De ellos, 9 tienen mensajes descriptivos en español y 11 tienen como mensaje un identificador UUID cuyo propósito no está documentado en el historial (**no verificado**). Hitos verificables: `c389b64` «Restauración del estado final tras reciclado del sandbox» (2026-11-03 19:06:40 UTC, el árbol pasa de 565 a 223 archivos) y `442cd6e` «Corrección técnica: reinicio de conteo en handlers y dependencias de hooks» (2026-11-03 20:29:52 UTC).
 - **Punto de partida del rebranding**: commit `442cd6e8206fd0fa722feca0d72a47b00039c267` (2026-11-03 20:29:52 UTC), extremo de `main`, con árbol de trabajo limpio (verificación previa al inicio; véase la incidencia de permisos en la sección 9).
 - **Rama de trabajo del rebranding**: `rebrand/cig-manufacturing`, creada desde `442cd6e` sin modificar `main`. Sin operaciones remotas (el repositorio no tiene remoto configurado).
-- **Procedencia de componentes**: la base tecnológica corresponde a un scaffold Next.js + Tailwind + shadcn/ui + TypeScript (el campo `name` de `package.json` es `nextjs_tailwind_shadcn_ts`, plantilla de arranque sin identidad de producto). Los componentes de `src/components/ui/` siguen la estructura estándar de shadcn/ui. El desarrollo de los módulos de negocio y la identidad FabriFlow son originales del historial de este repositorio desde el commit `5f0a197`. No existe evidencia en el historial de otra procedencia (**no verificado cualquier origen anterior a `860eb1f`**).
+- **Historial publicado (no verificable localmente)**: según la orden de trabajo de cierre (recibida el 2026-11-04, hora del entorno de ejecución), la rama de rebranding fue publicada posteriormente en GitHub con el nombre `rebranding-documentacion-de-procedencia`. Esa rama publicada **no forma parte de las referencias locales** de este entorno, sus SHA no han sido verificados aquí y no deben confundirse con los SHA del historial local documentados en este archivo. No se afirma correspondencia entre ambos por falta de evidencia local (**no verificado**).
+- **Procedencia de componentes**: la base tecnológica corresponde a un scaffold Next.js + Tailwind + shadcn/ui + TypeScript (el campo `name` de `package.json` era `nextjs_tailwind_shadcn_ts` —plantilla de arranque sin identidad de producto— hasta la 2.ª intervención, que lo renombró a `cig-manufacturing`; véase 11.3). Los componentes de `src/components/ui/` siguen la estructura estándar de shadcn/ui. El desarrollo de los módulos de negocio y la identidad FabriFlow son originales del historial de este repositorio desde el commit `5f0a197`. No existe evidencia en el historial de otra procedencia (**no verificado cualquier origen anterior a `860eb1f`**).
 
 ## 2. Motivo del cambio de identidad
 
@@ -37,7 +38,10 @@ Esta operación **no** constituye una reconstrucción, una migración tecnológi
 | Punto de partida del rebranding | 2026-11-03 | `442cd6e` en rama `rebrand/cig-manufacturing` | Rama creada desde `main`; árbol limpio verificado |
 | Cambio de identidad | 2026-11-03 | Commit `9ec457f` | 95 sustituciones 1:1 en 23 archivos; identificación oficial CIG-MANUFACTURING aplicada |
 | Validación | 2026-11-03 | Sección 7 de este documento | 12 verificaciones funcionales y técnicas ejecutadas; E2E comparada contra el estado base |
-| Resultado | 2026-11-03 | Último commit de la rama `rebrand/cig-manufacturing` | Registro de procedencia y trazabilidad; rama lista para auditoría externa |
+| Resultado (1.ª intervención) | 2026-11-03 | `d094512` (extremo de la rama) | Registro de procedencia y trazabilidad; rama lista para auditoría externa |
+| Cierre técnico (2.ª intervención) | 2026-11-03 22:35:28 UTC | Commit `2b5e66d` | Identificadores Docker/persistencia/paquete sustituidos (13 sustituciones en 5 archivos) con autorización expresa de la propiedad |
+| Cierre documental (2.ª intervención) | 2026-11-03/04 | Sección 11 de este documento | Registro completo de la segunda intervención, validaciones y auditoría final |
+| Regeneración de paquetes de entrega | 2026-11-04 | Extremo de `rebrand/cig-manufacturing` posterior al cierre | ZIP/TAR regenerados a petición de la propiedad desde el estado de cierre completo; hashes publicados en `descargas.html` (página de entrega, fuera del repositorio) |
 
 No se reescribió ni alteró el historial de Git para adaptar esta cronología: todos los SHA citados son verificables con `git show`.
 
@@ -73,6 +77,8 @@ No se reescribió ni alteró el historial de Git para adaptar esta cronología: 
 
 Los esloganes oficiales («Sistema de Gestión de Fábrica» / «Factory Management System») ya estaban presentes en el diccionario y el título; se conservaron sin alteración y se verificó su correcta presentación en ambos idiomas.
 
+> Las 13 sustituciones de la **segunda intervención** (cierre técnico: Docker, persistencia y paquete) se detallan en la sección 11.3 de este documento.
+
 ## 5. Compatibilidad y continuidad
 
 Tratamiento de cada elemento sensible, con su decisión y su impacto real:
@@ -82,15 +88,15 @@ Tratamiento de cada elemento sensible, con su decisión y su impacto real:
 | **Cookie de sesión** | Renombrada (`cig_manufacturing_sesion`) | Las sesiones activas en el momento del despliegue del cambio dejan de reconocerse y el usuario debe iniciar sesión de nuevo (una sola vez). No hay pérdida de datos: la cookie solo transporta el JWT de sesión. No se implementó alias de doble lectura porque añadiría código de compatibilidad no autorizado. Verificado: emisión y aceptación de la cookie nueva en servidor real. |
 | **Secreto de firmado (`AUTH_SECRET`)** | Valor por defecto de desarrollo renombrado | Solo afecta a entornos que NO definan `AUTH_SECRET` (desarrollo): invalida sesiones previas (mismo efecto y cadencia que la cookie). En producción, `AUTH_SECRET` se define en `.env`/secreto del orquestador y no se ve afectado. No se tocó el mecanismo de firmado. |
 | **Claves de `localStorage`** (`idioma`, `seccion`, `modulo`) | Renombradas (`cig-manufacturing.*`) | Las preferencias guardadas (idioma elegido, sección y módulo activos) se leen de la clave nueva, ausente en navegadores existentes: vuelven al valor por defecto («es», primera sección, primer módulo) hasta la próxima interacción. Impacto menor, autorecuperable por el usuario. Sin alias por el mismo criterio de alcance. |
-| **Identificadores de servicios Docker** | **Conservados** (excepción técnica) | El servicio `fabriflow`, `container_name: fabriflow`, el volumen `fabriflow-data` y la ruta de BD `file:/data/fabriflow.db` de `docker-compose.yml` y `Dockerfile` NO se renombraron: hacerlo crearía contenedores/volúmenes nuevos y una **base de datos vacía** en los despliegues existentes (pérdida de acceso a los datos), exactamente lo que la orden de trabajo prohíbe. Su sustitución exige un procedimiento de migración (renombrado manual del volumen y del archivo de BD) que excede el alcance autorizado. Decisión técnica pendiente de la propiedad del proyecto. |
-| **Volúmenes persistentes** | **Conservados** | `fabriflow-data` se mantiene; ningún dato se pierde ni se duplica. Los comandos de respaldo documentados en `docker-compose.yml` (que dependen del nombre del servicio y de la ruta de la BD) siguen siendo válidos sin cambio. |
-| **Nombres y rutas de bases de datos** | Sin cambio en producción | `DATABASE_URL` no contiene la identidad (archivo `custom.db` en instalación local; `/data/fabriflow.db` en Docker, conservado por la excepción anterior). El esquema Prisma no se modificó. |
+| **Identificadores de servicios Docker** | **Renombrados** (2.ª intervención, commit `2b5e66d`) | Servicio, contenedor y volumen renombrados a `cig-manufacturing` / `cig-manufacturing-data` con autorización expresa de la propiedad (no existe instalación productiva con datos reales; el servidor en producción es exclusivamente un entorno de pruebas). En un despliegue de prueba existente, `docker compose up` creará volumen y BD nuevos con los nombres oficiales; los recursos de prueba anteriores pueden eliminarse (autorizado). |
+| **Volúmenes persistentes** | **Renombrados** (2.ª intervención) | `fabriflow-data` → `cig-manufacturing-data`; la BD Docker pasa a `/data/cig-manufacturing.db`; los comandos de respaldo/restauración de la cabecera de `docker-compose.yml` se actualizaron en consecuencia. La persistencia en la ruta nueva fue validada funcionalmente (sección 11.6). |
+| **Nombres y rutas de bases de datos** | Ruta Docker renombrada (2.ª intervención) | `DATABASE_URL` de Docker: `file:/data/cig-manufacturing.db` (Dockerfile y Compose coinciden exactamente). La instalación local sigue usando `custom.db` (sin identidad en la ruta). El esquema Prisma no se modificó. |
 | **Directorios de instalación** | Documentación nueva actualizada; instalaciones existentes intactas | La guía ahora ejemplifica `/opt/cig-manufacturing` para instalaciones **nuevas**. Una instalación existente en `/opt/fabriflow` sigue funcionando sin cambio alguno (su `.env` define su propia ruta). No se creó mecanismo de migración de rutas. |
 | **Variables de entorno** | Nombres sin cambio | `DATABASE_URL`, `AUTH_SECRET`, `PORT`, `HOSTNAME` conservan sus nombres (no contenían la identidad anterior salvo en valores de ejemplo y en el secreto por defecto de desarrollo, ya tratados). `.env.example` actualizado como documentación. |
 | **Nombres de archivos de respaldo** | Documentación nueva actualizada | La guía genera respaldos `cig-manufacturing-<fecha>.db` en instalaciones nuevas. Los respaldos ya existentes con el nombre histórico **no se renombran ni se eliminan** (son datos históricos del usuario). |
 | **Cuentas de prueba y datos de demostración** | Semilla renombrada; datos existentes intactos | Instalaciones nuevas crean `admin@cig-manufacturing.com` y `ti@cig-manufacturing.com` (contraseñas sin cambio). Las bases de datos **existentes** conservan sus cuentas con el dominio histórico: son datos persistentes del usuario y no se modificaron (la orden prohíbe modificar bases de datos reales). El inicio de sesión funciona con las cuentas existentes de cada instalación. |
 
-**Declaración de compatibilidad**: la compatibilidad retroactiva de sesiones y preferencias NO se ha conservado (se documentó el impacto de su pérdida, limitado a un reinicio de sesión y de preferencias de interfaz). La compatibilidad de **datos** (bases de datos, volúmenes, respaldos) sí se conserva íntegramente. No se ha probado una actualización en caliente de un despliegue Docker existente (**no verificado**); la continuidad de datos en ese escenario está garantizada por diseño (nombres de volumen y BD intactos), no por prueba.
+**Declaración de compatibilidad (actualizada tras la 2.ª intervención)**: la compatibilidad retroactiva de sesiones y preferencias de interfaz NO se conserva (impacto limitado a un reinicio de sesión y de preferencias, como arriba). La compatibilidad de identificadores Docker tampoco se conserva: fueron renombrados con autorización expresa al no existir instalación productiva. La **persistencia de datos en la ruta nueva** sí fue validada funcionalmente (sección 11.6: esquema, semilla, login, modificación y reinicio con la BD en `cig-manufacturing.db`). No se ha probado un contenedor Docker real (**no verificado en este entorno**, véase 11.10.1).
 
 ## 6. Declaración de continuidad del proyecto
 
@@ -142,6 +148,8 @@ Búsqueda global posterior al cambio, insensible a mayúsculas y con variantes (
 - **Nombres de archivos y directorios**: ningún archivo o directorio del repositorio contenía la identidad anterior (verificado antes y después).
 - **Documentación operativa vigente**: 0 coincidencias salvo la línea 154 de `DESPLIEGUE.md`, que describe el identificador conservado (excepción anterior).
 
+**Actualización (2.ª intervención, commits `2b5e66d` y siguientes)**: las 10 excepciones técnicas de la tabla anterior quedaron **resueltas y sustituidas** con autorización expresa de la propiedad. Tras el cierre, la búsqueda global sobre archivos rastreados arroja **0 coincidencias** fuera de este documento; el desglose por área está en la sección 11.9.
+
 ## 9. Incidencias detectadas durante la ejecución
 
 1. **Permisos de archivo alterados por el entorno (preexistente)**: al iniciar la tarea, 72 archivos rastreados presentaban cambio de modo `100644 → 100755` (bit de ejecutable añadido) sin cambio de contenido, atribuible al reciclado del entorno. Se restauraron los modos al estado del índice de `442cd6e` (sin alterar contenido) para partir de un árbol limpio. Sin impacto en el resultado.
@@ -150,9 +158,178 @@ Búsqueda global posterior al cambio, insensible a mayúsculas y con variantes (
 4. **Servidor del entorno re-arrancado por el sistema**: durante la verificación, el mecanismo del entorno relanzó un servidor de desarrollo en el puerto 3000; se utilizó para las validaciones (sirve el código rebrandeado). Sin impacto en el repositorio.
 
 5. **Commits creados inicialmente sobre `main` y recolocados**: el entorno de ejecución revirtió la rama activa (de `rebrand/cig-manufacturing` a `main`) sin intervención ni aviso durante la tarea, por lo que los commits de implementación (`9ec457f`) y de documentación (`27a4866`) se crearon inicialmente sobre `main`. Se recolocaron en la rama `rebrand/cig-manufacturing` y `main` se restauró a su punto de partida (`442cd6e`); ningún commit previo fue modificado ni eliminado (verificable: los tres commits citados existen íntegros y `main` apunta a `442cd6e`). La corrección se ejecutó el mismo día, antes de la entrega. El entorno continúa forzando la rama activa hacia `main`, por lo que la auditoría debe realizarse sobre la rama `rebrand/cig-manufacturing` y no sobre la rama activa del entorno.
+6. **Docker no disponible en el entorno (2.ª intervención)**: el sandbox no dispone del binario `docker` ni `docker compose`; las pruebas de sintaxis real de Compose, construcción de imagen, ejecución de contenedor y persistencia con contenedor real **no se ejecutaron**. Se sustituyeron por validaciones alternativas documentadas (11.5.6-8 y 11.6). Estado: **no ejecutable en este entorno**.
+7. **Reciclado del sandbox durante la 2.ª intervención (recurrente)**: el entorno revirtió la rama activa a `main` en varias ocasiones entre comandos (misma causa que la incidencia 5). Ningún trabajo se perdió: cada comando re-establece la rama antes de operar y los commits existen íntegros en `rebrand/cig-manufacturing` (verificado al cierre: `2b5e66d`, `27a4866`, `9ec457f`, `d094512`).
+8. **Suites E2E con prerrequisitos de datos (2.ª intervención)**: con la BD de demostración recién reinicializada, `test-unidades.py`, `test-clientes.py`, `test-oqc-fix.py` y `test-oqc-sync.py` abortaban en sus precondiciones («hay almacén para pruebas», «hay almacén con 2 productos con stock», «No hay stock para probar»): los fixtures de la BD de desarrollo se perdieron con el reciclado del sandbox (incidencia 2 de la primera intervención). No es un defecto del código ni del rebranding: con fixtures mínimos creados vía API (almacén, 2 productos con stock ≥ 100 y un cliente activo), las suites pasan completas (sección 11.7). Nota operativa: el catálogo de unidades se auto-siembra en el primer `GET /api/unidades` (comportamiento previsto del sistema).
 
 ## 10. Confirmación de no modificación funcional
 
 - Commit de implementación: `9ec457f` — 23 archivos, **95 inserciones / 95 eliminaciones** (sustituciones 1:1 de cadenas de identidad; ninguna línea nueva de lógica, ninguna eliminada).
 - Sin cambios en: lógica de negocio, funciones, hooks, componentes funcionales, flujos de trabajo, endpoints, contratos API, esquema Prisma, modelos, relaciones, permisos, roles, autenticación (mecanismo), autorización, validaciones, dependencias, versiones de paquetes, arquitectura, estructura modular, sincronización, respaldo ni comportamiento de la aplicación.
 - El historial de Git no se reescribió ni alteró; `main` permanece en `442cd6e`; el rebranding vive únicamente en la rama `rebrand/cig-manufacturing`, lista para auditoría externa antes de cualquier integración.
+
+**Segunda intervención (cierre técnico)**:
+- Commit de implementación: `2b5e66dd45d64e3a30b160fd70c800dc7d7e4dc7` — 5 archivos, **12 inserciones / 12 eliminaciones** (13 sustituciones 1:1 de identificadores: 8 en `docker-compose.yml`, 2 en `Dockerfile`, 1 en `DESPLIEGUE.md`, 1 en `package.json`, 1 en `bun.lock`; ninguna línea nueva de lógica).
+- Sin cambios en: lógica de negocio, funciones, hooks, componentes funcionales, flujos de trabajo, endpoints, contratos API, esquema Prisma, modelos, permisos, roles, autenticación, autorización, validaciones, dependencias, versiones de paquetes, arquitectura, estructura modular, sincronización, respaldo ni comportamiento.
+- Verificación de integridad de la 1.ª intervención: cookie `cig_manufacturing_sesion`, secreto de desarrollo, claves `cig-manufacturing.*` de localStorage, semilla con cuentas `@cig-manufacturing.com`, UI/diccionarios, docs, CI y scripts rebrandeados siguen presentes y funcionales (validado en 11.6-11.8).
+
+---
+
+## 11. Registro de la segunda intervención: cierre del rebranding
+
+### 11.1. Marco de la intervención
+
+- **Fecha de ejecución**: 2026-11-03 ≈22:00–22:50 UTC (2026-11-04 en la zona horaria del entorno de ejecución, UTC+8). Orden de trabajo de cierre recibida del propietario del proyecto.
+- **Rama local**: `rebrand/cig-manufacturing` (la misma rama de la primera intervención; verificada como rama activa y árbol limpio al iniciar).
+- **Commit base de la 2.ª intervención**: `d0945126eef8d2c7f417fe8b1266b854018de23c` — «docs: registra recolocacion de commits en la rama de entrega» (2026-11-03 21:52:58 UTC).
+- **Commits de la 1.ª intervención**: `9ec457f` (implementación, 95 sustituciones en 23 archivos), `27a4866` (presente documento), `d094512` (registro de recolocación de commits).
+- **Commit de cierre técnico**: `2b5e66dd45d64e3a30b160fd70c800dc7d7e4dc7` — «Cierre del rebranding: identificadores Docker y de persistencia» (2026-11-03 22:35:28 UTC).
+- **Commit de cierre documental**: la actualización de este documento (commit inmediatamente posterior al técnico).
+- **Autorización específica**: la propiedad autorizó eliminar y sustituir los identificadores técnicos antiguos (servicios Docker, contenedores, volúmenes, imágenes, rutas SQLite, directorios de ejemplo, respaldos, systemd/PM2, identificadores de almacenamiento y referencias en scripts/configuración) porque **no existe instalación productiva** con información real que preservar; el servidor configurado en modo producción tiene exclusivamente fines de prueba, validación de compilaciones y comprobación del sistema. La autorización permite reinicializar recursos de prueba propios del proyecto; no autoriza operaciones sobre infraestructura externa.
+
+### 11.2. Identificadores oficiales aplicados
+
+| Elemento | Identificador oficial |
+|---|---|
+| Nombre del proyecto | `CIG-MANUFACTURING` |
+| Identificador técnico | `cig-manufacturing` |
+| Servicio Docker | `cig-manufacturing` |
+| Contenedor Docker | `cig-manufacturing` |
+| Volumen Docker | `cig-manufacturing-data` |
+| Archivo SQLite (Docker) | `cig-manufacturing.db` |
+| Ruta SQLite (Docker) | `/data/cig-manufacturing.db` |
+| Eslogan español | Sistema de Gestión de Fábrica |
+| Eslogan inglés | Factory Management System |
+| Nombre del paquete raíz | `cig-manufacturing` (`package.json` + `bun.lock`) |
+
+Sin nombres alternativos introducidos.
+
+### 11.3. Archivos modificados y sustituciones (commit `2b5e66d`)
+
+| # | Archivo | Sust. | Detalle |
+|---|---|---|---|
+| 1 | `docker-compose.yml` | 8 | Servicio `fabriflow:` → `cig-manufacturing:`; `container_name: fabriflow` → `cig-manufacturing`; `DATABASE_URL: file:/data/fabriflow.db` → `file:/data/cig-manufacturing.db`; montaje `- fabriflow-data:/data` → `- cig-manufacturing-data:/data`; declaración `fabriflow-data:` → `cig-manufacturing-data:`; comandos de respaldo (`docker compose exec cig-manufacturing sqlite3 /data/cig-manufacturing.db …`) y restauración (`docker compose cp cig-manufacturing:…`) de la cabecera |
+| 2 | `Dockerfile` | 2 | Volumen del ejemplo de ejecución (`-v cig-manufacturing-data:/data`) y `DATABASE_URL=file:/data/cig-manufacturing.db`; coincide exactamente con Compose |
+| 3 | `DESPLIEGUE.md` | 1 | Referencia al volumen persistente `cig-manufacturing-data` |
+| 4 | `package.json` | 1 | `"name"`: `nextjs_tailwind_shadcn_ts` → `cig-manufacturing` (el valor anterior era el nombre de la plantilla de arranque, sin identidad de producto; véase §1, procedencia de componentes) |
+| 5 | `bun.lock` | 1 | Nombre del espacio de trabajo raíz → `cig-manufacturing` (edición 1:1 coherente con `package.json`; el lockfile **no** se regeneró; consistencia verificada con `bun install --frozen-lockfile --dry-run` exitoso) |
+
+**Total: 13 sustituciones 1:1 en 5 archivos** (12 líneas modificadas, 0 añadidas o eliminadas netas — verificable con `git show 2b5e66d --stat`). La sustitución se ejecutó con un script auxiliar de verificación atómica (herramienta de sesión no incluida en el repositorio y eliminada tras completar la auditoría) que valida todos los conteos esperados antes de escribir cualquier archivo y verifica la ausencia de residuos tras aplicar.
+
+### 11.4. Identificadores renombrados vs. conservados
+
+| Identificador | Decisión | Justificación / estado |
+|---|---|---|
+| Servicio, contenedor y volumen Docker; ruta SQLite Docker | **Renombrados** (2.ª) | Autorización expresa; sin instalación productiva |
+| Cookie de sesión `cig_manufacturing_sesion` | Ya renombrada (1.ª) | Re-verificada: emisión y aceptación probadas (11.6) |
+| Secreto de desarrollo (`cig-manufacturing-…`) | Ya renombrado (1.ª) | Login y sesión probados con él |
+| Claves localStorage `cig-manufacturing.*` (idioma/sección/módulo) | Ya renombradas (1.ª) | Re-verificadas en navegador real (11.8) |
+| Cuentas demo `admin@` y `ti@cig-manufacturing.com` | Ya renombradas (1.ª) | Re-verificado: login de ambas (11.6) |
+| Nombres de variables de entorno (`DATABASE_URL`, `AUTH_SECRET`, `PORT`, `HOSTNAME`) | **Conservados** | Nunca contuvieron la identidad; solo cambian valores de ejemplo |
+| Esquema Prisma, modelos, tablas y relaciones | **Conservados** (sin cambio) | Restricción de alcance; `prisma validate` ✔ |
+| Archivos y directorios del repositorio | Sin renombros necesarios | Ninguno contenía la denominación anterior (verificado; véase 11.9) |
+| Registros históricos de Git | **Conservados intactos** | Prohibición expresa de reescribir el historial |
+| Menciones históricas en este documento | **Conservadas** | Único lugar autorizado (registro de procedencia) |
+
+### 11.5. Validaciones técnicas
+
+| # | Prueba | Resultado | Evidencia |
+|---|---|---|---|
+| 1 | ESLint (`bun run lint`) | **Aprobada** | Sin errores ni advertencias |
+| 2 | TypeScript (`bunx tsc --noEmit`) | **Aprobada** | Sin errores |
+| 3 | Prisma validate | **Aprobada** | «The schema at prisma/schema.prisma is valid» |
+| 4 | Prisma generate | **Aprobada** | Cliente generado |
+| 5 | Build de producción (`bun run build`) | **Aprobada** | Todas las rutas compiladas (con `package.json` ya renombrado) |
+| 6 | Sintaxis YAML de `docker-compose.yml` (alternativa a Compose real) | **Aprobada** | `yaml.safe_load` correcto; servicio/contenedor/volumen/ruta oficiales confirmados programáticamente |
+| 7 | Coherencia Dockerfile ↔ Compose | **Aprobada** | Volumen, ruta SQLite e identidad presentes e idénticos en ambos; cero referencias anteriores |
+| 8 | Consistencia del lockfile tras el renombrado del paquete | **Aprobada** | `bun install --frozen-lockfile --dry-run` → sin diferencias, salida exitosa |
+| 9 | `docker compose config` (real) | **No ejecutable** | `docker`/`docker compose` no instalados en el sandbox (incidencia 9.6) |
+| 10 | Construcción de imagen `cig-manufacturing` (real) | **No ejecutable** | Ídem |
+| 11 | Ejecución de contenedor y volumen reales | **No ejecutable** | Ídem |
+
+### 11.6. Persistencia SQLite en la ruta nueva (simulación funcional del flujo Docker)
+
+Docker no disponible en el entorno; se reprodujo el flujo exacto del `CMD` del Dockerfile (`bunx prisma db push --skip-generate` → `bun prisma/seed.ts` → servidor standalone) sobre un directorio aislado con `DATABASE_URL=file:…/cig-manufacturing.db` (puerto 3105). **Resultado: 15/15 pasos aprobados.**
+
+| # | Paso | Resultado |
+|---|---|---|
+| 1 | Esquema creado en la ruta nueva (`db push`) | ✔ |
+| 2 | Semilla ejecutada | ✔ |
+| 3 | Cuentas `admin@` y `ti@cig-manufacturing.com` verificadas directamente en SQLite; sin cuentas con dominio anterior | ✔ |
+| 4 | Servidor de producción arrancado contra esa BD | ✔ |
+| 5 | `GET /api` → 200 | ✔ |
+| 6 | Login admin → 200; cookie `cig_manufacturing_sesion` emitida | ✔ |
+| 7 | Login ti → 200 | ✔ |
+| 8 | Sesión autenticada (`/api/auth/sesion`) → 200 | ✔ |
+| 9 | Catálogo de unidades auto-sembrado (13) y unidad de prueba creada vía API → 201 | ✔ |
+| 10 | Modificación verificada directamente en SQLite | ✔ |
+| 11 | **Reinicio del servidor** (equivalente funcional al reinicio del contenedor) | ✔ |
+| 12 | La modificación **sobrevive** al reinicio | ✔ |
+| 13 | La sesión (JWT firmado) sigue válida tras el reinicio | ✔ |
+| 14 | La unidad creada es visible por la API tras el reinicio | ✔ |
+| 15 | Login operativo tras el reinicio | ✔ |
+
+### 11.7. Pruebas funcionales E2E existentes
+
+Ejecutadas sobre el build rebrandeado (`.next/standalone`), con la BD de demostración **reinicializada** mediante el flujo del CMD Docker (`db push` + semilla; respaldo previo de la BD en `/tmp/custom.db.backup-*`) y fixtures mínimos creados vía API (almacén `FIX-ALM`, productos `FIX-0001`/`FIX-0002` con ENTRADA de 150 c/u, cliente `CLI-FIX`):
+
+| Suite | Resultado | Observaciones |
+|---|---|---|
+| `scripts/test-unidades.py` | **Aprobada: 56 OK / 0 FAIL** | Requiere como prerrequisito un almacén activo y un cliente activo |
+| `scripts/test-clientes.py` | **Aprobada: 66/66** | |
+| `scripts/test-oqc-fix.py` | **Aprobada: 70 OK / 0 FAIL** | Requiere almacén con 2 productos y stock ≥ 100 |
+| `scripts/test-oqc-sync.py` | **Aprobada: 40 OK / 0 FAIL** | Ídem |
+| `scripts/test-respaldo.py` | **Aprobada: 71 OK / 0 FALLAS** | |
+| `scripts/test-borrado.sh` | **Ejecutada con fallos preexistentes: 27 correctas / 9 fallidas** | Las 9 fallidas son los defectos previos del módulo de borrado con historial; resultado idéntico (27/9) al estado base `442cd6e` y a la primera intervención: **cero regresiones atribuibles al rebranding** |
+
+### 11.8. Validación de interfaz en navegador real
+
+| # | Verificación | Resultado |
+|---|---|---|
+| 1 | Página de acceso en español («Bienvenido de nuevo», «Iniciar sesión») | ✔ |
+| 2 | Login `admin@cig-manufacturing.com` → sesión iniciada | ✔ |
+| 3 | Barra lateral: «CIG-MANUFACTURING» + «Sistema de Gestión de Fábrica» | ✔ |
+| 4 | Navegación por módulos (Almacén, Catálogo, Clientes, OQC, Sistema) | ✔ (módulo Clientes abierto) |
+| 5 | Conmutador ES/EN: inglés muestra «Factory Management System», «Modules» | ✔ |
+| 6 | Preferencia persistida: `localStorage["cig-manufacturing.idioma"] = "en"` | ✔ |
+| 7 | Claves rebrandeadas en uso: `cig-manufacturing.idioma`, `cig-manufacturing.modulo`, `cig-manufacturing.seccion` | ✔ |
+| 8 | Título del documento: «CIG-MANUFACTURING — Sistema de Gestión de Fábrica \| Factory Management System» | ✔ |
+
+Nota: en un navegador sin preferencia guardada el idioma inicial se autodetecta del sistema (el navegador headless de prueba arrancó en inglés y se conmutó manualmente al español): comportamiento previsto, no un defecto.
+
+### 11.9. Búsqueda global final (2.ª intervención)
+
+Búsqueda insensible a mayúsculas con todas las variantes (`fabriflow`, `FabriFlow`, `FABRIFLOW`, `fabri-flow`, `fabri_flow`, `fabri flow`) sobre los archivos rastreados (`git grep -i -E "fabriflow|fabri-flow|fabri_flow|fabri flow"`) tras el cierre técnico:
+
+| Área | Coincidencias |
+|---|---|
+| Interfaz / presentación | **0** |
+| Código fuente operativo | **0** |
+| Configuración (incl. `.env.example`, CI) | **0** |
+| Docker (Compose, Dockerfile) | **0** |
+| Persistencia (rutas, BD, volúmenes) | **0** |
+| Scripts | **0** |
+| Pruebas | **0** |
+| Despliegue vigente (`DESPLIEGUE.md`) | **0** |
+| Nombres de archivos y directorios | **0** (verificado también sobre el árbol de trabajo con búsqueda de nombres) |
+| Documentación vigente (`README.md`, `setup.sh`, `start.sh`, docs operativas) | **0** |
+| **Documento histórico de procedencia (este archivo)** | **Únicas menciones autorizadas** (registro histórico de la identidad anterior) |
+
+Los registros históricos de Git originales permanecen intactos (prohibición expresa de alterarlos).
+
+**Búsqueda exhaustiva sobre el árbol de trabajo completo** (adicional a los archivos rastreados; `rg --no-ignore --hidden`, insensible a mayúsculas, excluyendo solo `.git` y `node_modules`): se localizaron artefactos derivados con la identidad anterior y se trataron así: (a) la caché de compilación de desarrollo `.next/dev` (chunks del servidor de desarrollo de sesiones previas) fue **eliminada** — artefacto regenerable, no fuente; (b) las copias de herramientas auxiliares de sesión arrastradas en `.next/standalone/scripts/` fueron **eliminadas**; (c) la copia del presente documento en `.next/standalone/docs/` fue **sincronizada** con la versión vigente. Tras la limpieza, las únicas coincidencias de texto en el árbol de trabajo son el presente documento y su copia en el directorio de compilación (ambas, registro histórico autorizado). Verificación de binarios: `db/custom.db` sin ocurrencias; los paquetes ZIP/TAR previos contienen la instantánea de la primera intervención (véase 11.10.4). Nota metodológica: las búsquedas usaron los patrones completos de la denominación anterior (`fabriflow` y variantes), nunca fragmentos, para evitar falsos positivos con la palabra legítima «fábrica».
+
+### 11.10. Incidencias, limitaciones y pendientes de la 2.ª intervención
+
+1. **Docker real no ejecutable en el sandbox** (incidencia 9.6): `docker compose config`, construcción de imagen, ejecución de contenedor, verificación del volumen `cig-manufacturing-data` y persistencia **con contenedor real** no se ejecutaron. Sustituidos por: validación de sintaxis YAML, comprobación programática de coherencia Dockerfile↔Compose y simulación funcional completa del flujo (11.6). **Pendiente**: ejecutar el ciclo Docker real (construir → levantar → sembrar → modificar → `docker compose restart` → verificar) en un entorno con Docker.
+2. **Reciclados recurrentes del sandbox** (incidencia 9.7): gestionados; sin pérdida de trabajo ni de commits.
+3. **Prerrequisitos de datos de suites E2E** (incidencia 9.8): resueltos con fixtures vía API; el flujo queda documentado para futuras ejecuciones.
+4. **Paquetes ZIP/TAR de entrega** (regenerados tras el cierre, a petición de la propiedad): los paquetes previos (ZIP de 549.599 B; construidos el 2026-11-03 ≈21:54 UTC desde el estado de la primera intervención, esencialmente `27a4866`, con una versión intermedia del presente documento) incluían la primera intervención pero no el cierre técnico de la segunda: conservaban las 11 ocurrencias técnicas de la denominación anterior que entonces eran excepciones documentadas (`docker-compose.yml` 8, `Dockerfile` 2, `DESPLIEGUE.md` 1). El 2026-11-04, por instrucción expresa de la propiedad, los paquetes fueron **regenerados** desde el extremo de la rama `rebrand/cig-manufacturing` posterior al cierre documental (estado completo: corrección técnica `442cd6e`, primera intervención `9ec457f`–`d094512`, cierre técnico `2b5e66d`, registro documental `b272511`–`b3be1ea` y el presente registro), con el procedimiento de empaquetado determinista del entorno: staging desde `git archive` del extremo, manifiesto verificado contra `git ls-files`, exclusión de herramientas privadas, comprobación de ausencia de secretos y de contenido prohibido, verificación de los archivos indispensables, `prisma validate` del esquema incluido y equivalencia exacta zip≡tar. La página de entrega `descargas.html` (fuera del repositorio) publica los hashes SHA-256 definitivos y queda sincronizada con los paquetes servidos. Ambos son artefactos de entrega excluidos del repositorio.
+5. **Servidor de preview del entorno** (:3000, expuesto vía Caddy :81): rearrancado al cierre sirviendo el build rebrandeado con la BD de demostración reinicializada; el estado del entorno queda coherente con la rama.
+
+### 11.11. Confirmación final de la segunda intervención
+
+- Los cambios se limitan a sustituciones de identidad: **13 sustituciones en 5 archivos, cero cambios de lógica, dependencias, versiones, esquema de datos o comportamiento** (auditoría del diff completo `git show 2b5e66d`).
+- Los cambios de la primera intervención permanecen íntegros y funcionales (11.6-11.8).
+- `main` no fue modificada; el historial no fue reescrito; no se realizaron operaciones remotas.
+- La rama `rebrand/cig-manufacturing` queda **terminada** y lista para su publicación y auditoría externa.

@@ -4,23 +4,23 @@
 #   Primera vez:   docker compose up -d --build
 #   Ver logs:      docker compose logs -f
 #   Detener:       docker compose down
-#   Respaldo BD:   docker compose exec fabriflow sqlite3 /data/fabriflow.db ".backup '/tmp/respaldo.db'"
-#                  (luego: docker compose cp fabriflow:/tmp/respaldo.db ./respaldo.db)
+#   Respaldo BD:   docker compose exec cig-manufacturing sqlite3 /data/cig-manufacturing.db ".backup '/tmp/respaldo.db'"
+#                  (luego: docker compose cp cig-manufacturing:/tmp/respaldo.db ./respaldo.db)
 # ============================================================
 services:
-  fabriflow:
+  cig-manufacturing:
     build: .
-    container_name: fabriflow
+    container_name: cig-manufacturing
     restart: unless-stopped
     ports:
       - "3000:3000"          # puerto:host  → cambia el de la izquierda si el 3000 está ocupado
     environment:
       # ⚠️ Genera tu propia clave:  openssl rand -hex 32
       AUTH_SECRET: ${AUTH_SECRET:-cambia-esta-clave-con-openssl-rand-hex-32}
-      DATABASE_URL: file:/data/fabriflow.db
+      DATABASE_URL: file:/data/cig-manufacturing.db
       NODE_ENV: production
     volumes:
-      - fabriflow-data:/data
+      - cig-manufacturing-data:/data
 
 volumes:
-  fabriflow-data:
+  cig-manufacturing-data:
