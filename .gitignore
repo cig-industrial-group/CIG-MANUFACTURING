@@ -1,0 +1,33 @@
+# Dependencias
+node_modules
+/.pnp
+.pnp.*
+
+# Next.js
+/.next/
+/out/
+next-env.d.ts
+*.tsbuildinfo
+
+# Producción
+/build
+
+# Entorno (¡no subas tu AUTH_SECRET!)
+.env
+.env.*
+!.env.example
+
+# Base de datos local
+db/*.db
+db/*.db-journal
+
+# Registros y temporales
+*.log
+.DS_Store
+*.pem
+npm-debug.log*
+.vercel
+
+# Editor
+.idea
+.vscode

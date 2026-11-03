@@ -1,0 +1,533 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// MÓDULO: AUTENTICACIÓN / AUTHENTICATION
+// Roles con permisos, usuarios y configuración del sistema.
+// ============================================================
+
+model Rol {
+  id          String   @id @default(cuid())
+  clave       String   @unique // ADMIN | TI | JEFE_ALMACEN | ALMACENERO | OPERADOR | ...
+  nombre      String // nombre visible (ES)
+  nombreEn    String // nombre visible (EN)
+  descripcion String?
+  permisos    String // JSON: ["almacen.ver", "usuarios.gestionar", ...]
+  sistema     Boolean  @default(false) // los roles de sistema no se pueden eliminar
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  usuarios   Usuario[]
+}
+
+model Usuario {
+  id                  String    @id @default(cuid())
+  nombre              String
+  correo              String    @unique
+  passwordHash        String
+  rolId               String
+  activo              Boolean   @default(true)
+  debeCambiarPassword Boolean   @default(false)
+  ultimoAcceso        DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  rol           Rol              @relation(fields: [rolId], references: [id])
+  restablecimientos Restablecimiento[]
+}
+
+model Restablecimiento {
+  id        String    @id @default(cuid())
+  usuarioId String
+  codigoHash String
+  expiraEn  DateTime
+  usadoEn   DateTime?
+  createdAt DateTime  @default(now())
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId])
+}
+
+model Configuracion {
+  clave String @id
+  valor String // JSON
+}
+
+// ============================================================
+// MÓDULO: ALMACÉN / WAREHOUSE
+// ============================================================
+
+model Almacen {
+  id           String   @id @default(cuid())
+  codigo       String   @unique
+  nombre       String
+  ubicacion    String?
+  tipo         String   @default("GENERAL") // MATERIA_PRIMA | PRODUCTO_TERMINADO | GENERAL
+  responsable  String?
+  activo       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  stocks Stock[]
+}
+
+model Producto {
+  id           String    @id @default(cuid())
+  sku          String    @unique
+  nombre       String
+  descripcion  String?
+  categoria    String    @default("MATERIA_PRIMA") // MATERIA_PRIMA | PRODUCTO_TERMINADO | MATERIAL | INSUMO
+  unidad       String    @default("PZA") // código de la unidad BASE del catálogo (PZA, KG, M, L...)
+
+  // ===== Empaque para conteo (configurado POR PRODUCTO) =====
+  // La cantidad que lleva cada caja/paquete VARÍA por producto: se
+  // configura aquí, al registrar el producto, y NO en el catálogo de
+  // unidades. Ej.: 80101-06129 → 1 PAQ = 10 PZA; 80101-06130 → 1 PAQ = 24 PZA.
+  // El stock SIEMPRE vive en la unidad base; el empaque es solo una
+  // forma de capturar y desplegar el conteo (3 PAQ × 10 + 2 PZA = 32 PZA).
+  unidadPaquete    String? // código de la unidad de paquete del catálogo (PAQ, CJA...)
+  contenidoPaquete Float? // unidades base que contiene cada paquete (10)
+
+  stockMinimo  Float     @default(0)
+  costoUnitario Float?
+  activo       Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  stocks      Stock[]
+}
+
+model Stock {
+  id         String   @id @default(cuid())
+  productoId String
+  almacenId  String
+  cantidad   Float    @default(0)
+  updatedAt  DateTime @updatedAt
+
+  producto Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  almacen  Almacen  @relation(fields: [almacenId], references: [id], onDelete: Cascade)
+
+  @@unique([productoId, almacenId])
+  @@index([almacenId])
+}
+
+// REGISTRO INMUTABLE TIPO LEDGER: el movimiento es autodescriptivo.
+// Las referencias (productoId, almacénOrigen/DestinoId, usuarioId) son suaves
+// (sin FK) y los snapshots conservan los datos vivos al momento del registro,
+// de modo que el historial sobrevive intacto a la eliminación de cualquier
+// entidad referenciada — y se re-vincula solo si la entidad se restaura con
+// el mismo id desde la papelera.
+model Movimiento {
+  id               String   @id @default(cuid())
+  folio            String   @unique
+  tipo             String // ENTRADA | RECEPCION | SALIDA | TRASLADO | AJUSTE | SCRAP
+  productoId       String // referencia suave (sin FK)
+  almacenOrigenId  String? // referencia suave (sin FK)
+  almacenDestinoId String? // referencia suave (sin FK)
+  cantidad         Float
+  cantidadDespues  Float? // snapshot de stock resultante
+  motivo           String?
+  referencia       String? // factura, orden de compra, orden de producción...
+  responsable      String?
+  usuarioId        String? // referencia suave (sin FK)
+  usuarioNombre    String? // snapshot del usuario que registró el movimiento
+  editado          Boolean  @default(false) // true si fue corregido desde la sección de origen
+  createdAt        DateTime @default(now())
+
+  // ===== Snapshots del estado al momento del movimiento =====
+  productoSku          String  @default("")
+  productoNombre       String  @default("")
+  productoUnidad       String  @default("")
+  almacenOrigenCodigo  String?
+  almacenOrigenNombre  String?
+  almacenDestinoCodigo String?
+  almacenDestinoNombre String?
+
+  // ===== Salida a cliente (liberación de material) =====
+  // Referencia suave (sin FK) + snapshots: el historial de salidas
+  // sobrevive a la eliminación del cliente (papelera) y se re-vincula
+  // solo si el cliente se restaura con el mismo id.
+  clienteId     String?
+  clienteCodigo String?
+  clienteNombre String?
+
+  // ===== Agrupación a la salida OQC =====
+  // Referencia suave (sin FK) al agrupador SalidaOQC: una liberación
+  // registrada en una sola operación agrupa todas sus partidas bajo
+  // un folio único de salida. El folio es inmutable, así que viaja
+  // también como snapshot legible.
+  salidaId     String?
+  salidaFolio  String?
+
+  // ===== Conteo en paquetes (captura alternativa) =====
+  // Snapshot JSON de cómo se contó el movimiento cuando se capturó en
+  // cajas/paquetes + unidades sueltas:
+  //   [{ "u": "CJA", "n": "Caja", "f": 12, "c": 2 },
+  //    { "u": "PZA", "n": "Pieza", "f": 1, "c": 3 }]
+  // `cantidad` SIEMPRE queda expresada en la unidad base del producto
+  // (2 CJA × 12 + 3 PZA = 27 PZA): el stock nunca mezcla unidades. Este
+  // detalle conserva la captura original para consulta y auditoría
+  // (ledger inmutable). Al corregir un registro el conteo se limpia:
+  // la cantidad corregida se expresa en la unidad base.
+  conteoDetalle String?
+
+  @@index([tipo])
+  @@index([createdAt])
+  @@index([productoId])
+  @@index([clienteId])
+  @@index([salidaId])
+}
+
+// Bitácora inmutable de correcciones: cada edición o eliminación de un
+// registro de movimiento queda aquí con el estado anterior y el nuevo.
+// No lleva FK hacia Movimiento para que la bitácora sobreviva a las eliminaciones.
+model CorreccionMovimiento {
+  id            String   @id @default(cuid())
+  movimientoId  String? // id del movimiento afectado (informativo; sin FK)
+  folio         String // folio del movimiento afectado (se conserva siempre)
+  salidaId      String? // id de la SalidaOQC afectada (clave estable de enlace; sin FK)
+  salidaFolio   String? // folio de la salida OQC agrupadora (si aplica)
+  accion        String // EDICION | ELIMINACION
+  antes         String // JSON con el estado previo del registro
+  despues       String? // JSON con el estado corregido (null en eliminaciones)
+  motivo        String? // razón de la corrección capturada por el usuario
+  usuarioId     String? // referencia suave (sin FK)
+  usuarioNombre String? // snapshot del usuario que corrigió
+  createdAt     DateTime @default(now())
+
+  @@index([movimientoId])
+  @@index([salidaId])
+  @@index([salidaFolio])
+  @@index([createdAt])
+}
+
+// Series de folios monotónicas: una fila por serie (prefijo+fecha, p.ej.
+// "SAL-20261103"). Es la ÚNICA autoridad para emitir números de folio: el
+// contador jamás retrocede, de modo que eliminar el registro que portaba un
+// folio NO libera su número. En un entorno de fábrica un folio emitido es
+// único para siempre (etiquetas, referencias impresas y auditorías deben
+// poder confiar en él). La primera emisión de cada serie se siembra con el
+// máximo número ya emitido (registros vivos + bitácora) para respetar el
+// histórico de bases de datos existentes.
+model SecuenciaFolio {
+  id        String   @id @default(cuid())
+  clave     String   @unique // serie: prefijo-fecha (ej. SAL-20261103)
+  ultimo    Int // último número emitido en la serie
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================================
+// MÓDULO: UNIDADES DE MEDIDA / UNITS OF MEASURE
+// Catálogo configurable de unidades. Dos naturalezas:
+//   · Unidades base (CONTEO | PESO | LONGITUD | VOLUMEN | OTRO):
+//     la magnitud en la que vive el stock de un producto (PZA, KG,
+//     M, L...).
+//   · Unidades de paquete (PAQUETE): múltiplo de una unidad base
+//     usado para CONTEAR (CJA, PAQ, ROLLO-M…). El catálogo SOLO
+//     define la relación de unidad base (p. ej. PAQUETE→PZA):
+//     cuántas piezas lleva cada paquete VARÍA POR PRODUCTO y se
+//     configura al registrar el producto (Producto.contenidoPaquete).
+//     El stock SIEMPRE queda en la unidad base; el paquete es una
+//     forma de captura y despliegue (2 CJA + 3 PZA = 27 PZA).
+// ============================================================
+model UnidadMedida {
+  id         String   @id @default(cuid())
+  codigo     String   @unique // código corto en mayúsculas (PZA, CJA, KG...)
+  nombre     String // nombre visible (Pieza, Caja, Kilogramo...)
+  nombreEn   String // nombre visible en inglés
+  tipo       String // CONTEO | PESO | LONGITUD | VOLUMEN | OTRO | PAQUETE
+  unidadBase String? // código de la unidad base que agrupa (solo PAQUETE)
+  notas      String?
+  activo     Boolean  @default(true)
+  esSistema  Boolean  @default(false) // sembrada por el sistema: no eliminable
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([tipo])
+  @@index([unidadBase])
+}
+
+// ============================================================
+// MÓDULO: CATÁLOGO / CATALOG
+// Modelos de equipo/producto y números de parte asociados.
+// La asociación es muchos-a-muchos: un número de parte puede
+// pertenecer a varios modelos y un modelo agrupa varias partes.
+// ============================================================
+
+model Modelo {
+  id          String   @id @default(cuid())
+  codigo      String   @unique // código corto del modelo (ej. LW-2000)
+  nombre      String // nombre visible
+  descripcion String?
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  partes ModeloParte[]
+}
+
+model NumeroParte {
+  id          String   @id @default(cuid())
+  numero      String   @unique // número de parte (ej. MOT-0500-A)
+  nombre      String // descripción corta
+  descripcion String?
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  modelos ModeloParte[]
+}
+
+// Tabla de unión Modelo ↔ NumeroParte (explícita para poder
+// extenderla en el futuro: cantidades por unidad, criticidad, etc.)
+model ModeloParte {
+  modeloId      String
+  numeroParteId String
+  createdAt     DateTime @default(now())
+
+  modelo      Modelo      @relation(fields: [modeloId], references: [id], onDelete: Cascade)
+  numeroParte NumeroParte @relation(fields: [numeroParteId], references: [id], onDelete: Cascade)
+
+  @@id([modeloId, numeroParteId])
+  @@index([numeroParteId])
+}
+
+// ============================================================
+// MÓDULO: CLIENTES / CUSTOMERS
+// Catálogo de clientes que reciben material de salida. La liberación
+// de material a cliente registra movimientos SALIDA que descuentan
+// stock del almacén de origen y quedan vinculados al cliente mediante
+// referencias suaves + snapshots (ver Movimiento).
+// ============================================================
+
+model Cliente {
+  id        String   @id @default(cuid())
+  codigo    String   @unique // código corto del cliente (ej. CLI-0001)
+  nombre    String // razón social o nombre visible
+  contacto  String? // persona de contacto
+  correo    String?
+  telefono  String?
+  direccion String?
+  notas     String?
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// ============================================================
+// MÓDULO: PAPELERA / RECYCLE BIN
+// Registro inmutable tipo log de eliminaciones. Cada envío a la
+// papelera conserva un snapshot completo del registro (datos JSON),
+// puede restaurarse durante 30 días y, tras la purga, la fila
+// sobrevive como bitácora (sin datos) para consulta histórica.
+// Sin FK: la papelera es un log y debe sobrevivir a todo.
+// ============================================================
+model Papelera {
+  id            String    @id @default(cuid())
+  entidad       String // PRODUCTO | ALMACEN | MODELO | NUMERO_PARTE | USUARIO | CLIENTE
+  entidadId     String // id original (re-vincula al restaurar)
+  identificador String // SKU / código / número / correo — sobrevive a la purga
+  nombre        String // nombre visible
+  datos         String? // JSON con el registro y sus relaciones (null tras purga)
+  estado        String    @default("EN_PAPELERA") // EN_PAPELERA | RESTAURADO | PURGADO
+  usuarioId     String? // quién envió a la papelera (referencia suave)
+  usuarioNombre String? // snapshot de quien eliminó
+  eliminadoEn   DateTime  @default(now())
+  expiraEn      DateTime // eliminadoEn + 30 días
+  restauradoEn  DateTime?
+  restauradoPor String? // id de quien restauró
+  purgadoEn     DateTime?
+  purgadoPor    String? // snapshot de quien purgó (null si fue purga automática)
+
+  @@index([estado, expiraEn])
+  @@index([entidad])
+  @@index([eliminadoEn])
+}
+
+// ============================================================
+// MÓDULO: OQC (CALIDAD DE SALIDA)
+// Liberaciones de material a clientes, registro de scrap y
+// rechazos de inspección. Las referencias entre entidades son
+// suaves (sin FK) + snapshots, siguiendo el patrón ledger del
+// sistema: la historia sobrevive a cualquier eliminación.
+// ============================================================
+
+// Salida OQC: agrupador ÚNICO de una liberación de material.
+// Cuando la liberación se registra en una sola operación, todas
+// sus partidas (Movimientos SALIDA) quedan ligadas a este folio.
+// Al eliminarse, la fila sobrevive como bitácora (estado ELIMINADA)
+// y cada partida queda en CorreccionMovimiento.
+model SalidaOQC {
+  id        String    @id @default(cuid())
+  folio     String    @unique // OQC-20261103-0001
+
+  // Cliente destino (referencia suave + snapshots)
+  clienteId     String?
+  clienteCodigo String?
+  clienteNombre String?
+
+  // Almacén del que se descuenta (referencia suave + snapshots)
+  almacenOrigenId     String?
+  almacenOrigenCodigo String?
+  almacenOrigenNombre String?
+
+  referencia   String? // remisión / pedido / folio de embarque
+  responsable  String? // quien firma la liberación
+  notas        String?
+
+  usuarioId     String? // referencia suave (sin FK)
+  usuarioNombre String? // snapshot del usuario que liberó
+
+  estado       String    @default("EMITIDA") // EMITIDA | ELIMINADA
+  eliminadaEn  DateTime?
+  eliminadaPor String? // snapshot de quien eliminó la salida completa
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([createdAt])
+  @@index([clienteId])
+  @@index([estado])
+}
+
+// Registro de scrap: material desechado tras la inspección.
+// Descuenta stock del almacén mediante un Movimiento tipo SCRAP
+// (referencia suave) y se corrige/elimina con bitácora, igual que
+// cualquier movimiento.
+model RegistroScrap {
+  id    String @id @default(cuid())
+  folio String @unique // SCR-20261103-0001
+
+  // Producto (referencia suave + snapshots)
+  productoId     String
+  productoSku    String
+  productoNombre String
+  productoUnidad String
+
+  // Almacén del que se descuenta (referencia suave + snapshots)
+  almacenId     String?
+  almacenCodigo String?
+  almacenNombre String?
+
+  cantidad    Float
+  motivo      String // causa del scrap (defecto, daño, no conforme...)
+  notas       String?
+  responsable String?
+
+  usuarioId     String? // referencia suave (sin FK)
+  usuarioNombre String? // snapshot del usuario que registró
+
+  movimientoId String? // referencia suave al Movimiento SCRAP generado
+
+  // Snapshot del conteo en paquetes con el que se capturó (ver Movimiento)
+  conteoDetalle String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([createdAt])
+  @@index([productoId])
+}
+
+// Registro de rechazo: material no conforme detectado en la
+// inspección de salida. No toca stock: documenta qué se rechazó,
+// para qué cliente y su disposición. Editable/eliminable directo.
+model RegistroRechazo {
+  id    String @id @default(cuid())
+  folio String @unique // RECH-20261103-0001
+
+  // Producto (referencia suave + snapshots)
+  productoId     String
+  productoSku    String
+  productoNombre String
+  productoUnidad String
+
+  // Cliente destino previsto (referencia suave + snapshots)
+  clienteId     String?
+  clienteCodigo String?
+  clienteNombre String?
+
+  // Salida OQC de la que provino el rechazo (referencia suave)
+  salidaId    String?
+  salidaFolio String?
+
+  cantidad     Float
+  motivo       String // defecto / causa del rechazo
+  disposicion  String @default("PENDIENTE") // PENDIENTE | RETRABAJO | SCRAP | LIBERADO
+  notas        String?
+  responsable  String?
+
+  usuarioId     String? // referencia suave (sin FK)
+  usuarioNombre String? // snapshot del usuario que registró
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([createdAt])
+  @@index([productoId])
+  @@index([clienteId])
+  @@index([salidaId])
+}
+
+// ============================================================
+// MÓDULO: RESPALDO / BACKUP
+// Respaldo completo de la base de datos (instantánea consistente
+// vía VACUUM INTO) y restauración EN CALIENTE con reversión:
+//   · Cada restauración crea un snapshot pre-restauración y queda
+//     registrada aquí (auditoría de fábrica).
+//   · Si la restauración falla a mitad de operación, la copia
+//     transaccional revierte TODO: la base queda intacta.
+//   · Si tiene éxito, hay una ventana de 24 horas para revertirla
+//     (restaurando el snapshot pre-restauración).
+// Ambos registros son REGISTROS DE LA MÁQUINA (describen archivos
+// en db/backups/): se EXCLUYEN de la copia al restaurar, de modo
+// que el inventario de respaldos siempre coincida con el disco.
+// ============================================================
+
+// Un archivo de respaldo en db/backups/. El archivo es una copia
+// byte-consistente de la base de datos completa.
+model RespaldoBD {
+  id             String   @id @default(cuid())
+  archivo        String   @unique // nombre del archivo en db/backups/
+  tipo           String // MANUAL | AUTOMATICO | PRE_RESTAURACION | DETECTADO | SUBIDO
+  etiqueta       String? // nota visible para el usuario
+  tamanoBytes    Int      @default(0)
+  totalRegistros Int      @default(0) // filas de datos que contiene
+  compatible     Boolean  @default(true) // ¿esquema compatible con la versión actual?
+  creadoEn       DateTime @default(now())
+  creadoPor      String? // snapshot del usuario que lo creó
+
+  @@index([tipo, creadoEn])
+  @@index([creadoEn])
+}
+
+// Bitácora de restauraciones (una fila por intento, incluidas las
+// reversiones). El estado EN_PROGRESO de una restauración interrumpida
+// (p. ej. por un reinicio del servidor) se marca FALLIDA al volver a
+// abrir el módulo.
+model RestauracionBD {
+  id                  String    @id @default(cuid())
+  respaldoArchivo     String // archivo que se restauró
+  snapshotPre         String? // snapshot creado ANTES de restaurar (punto de reversión)
+  tipo                String    @default("RESTAURACION") // RESTAURACION | REVERSION
+  estado              String    @default("EN_PROGRESO") // EN_PROGRESO | COMPLETADA | FALLIDA
+  reversionDeId       String? // si es REVERSION: la restauración que revierte
+  revertidaEn         DateTime? // cuándo una reversión la deshizo (null = vigente)
+  iniciadaEn          DateTime  @default(now())
+  completadaEn        DateTime?
+  ventanaReversaHasta DateTime? // completadaEn + 24 h: plazo para revertir
+  ejecutadaPor        String? // snapshot del usuario
+  totalRegistros      Int       @default(0)
+  duracionMs          Int       @default(0)
+  error               String? // mensaje si estado = FALLIDA
+
+  @@index([estado, iniciadaEn])
+  @@index([reversionDeId])
+}
