@@ -9,7 +9,7 @@
  *   4. La transacción crea UNA salida (folio OQC-...) que agrupa todas
  *      las partidas y descuenta el stock del almacén (todo o nada).
  */
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ArrowUpFromLine, PackageCheck, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { useIdioma, useFormateadores } from "@/modulos/compartidos/idioma";
 import { CargandoFilas, EncabezadoSeccion, EstadoVacio, SelectorBuscador } from "@/modulos/compartidos/ui";
@@ -128,11 +128,15 @@ export function LiberarSalidas() {
   }
 
   /** Total de una línea en unidad base (directo o paquetes + sueltas
-   *  según el empaque configurado del producto) */
-  function totalLinea(linea: LineaFormulario): number {
-    const producto = productosActivos.find((p) => p.id === linea.productoId) ?? null;
-    return calcularConteo(linea.conteo, producto).total;
-  }
+   *  según el empaque configurado del producto). Memorizada con useCallback:
+   *  la consumen los useMemo de abajo y solo depende de productosActivos. */
+  const totalLinea = useCallback(
+    (linea: LineaFormulario): number => {
+      const producto = productosActivos.find((p) => p.id === linea.productoId) ?? null;
+      return calcularConteo(linea.conteo, producto).total;
+    },
+    [productosActivos],
+  );
 
   /** Partidas válidas (producto elegido y cantidad > 0) */
   const partidasValidas = useMemo(
@@ -156,7 +160,7 @@ export function LiberarSalidas() {
               }),
           };
         }),
-    [lineas, productosActivos],
+    [lineas, productosActivos, totalLinea],
   );
 
   /** La misma partida puede capturarse en 2 líneas; se suman al liberar */
@@ -181,7 +185,7 @@ export function LiberarSalidas() {
       }
     }
     return excedidas;
-  }, [lineas, stockPorProducto, almacenOrigenId, productosActivos]);
+  }, [lineas, stockPorProducto, almacenOrigenId, totalLinea]);
 
   function validar(): string | null {
     if (!clienteId) return t("oqc.clienteRequerido");

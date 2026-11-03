@@ -448,8 +448,11 @@ export function GestionUsuarios() {
   const [porAlternar, setPorAlternar] = useState<UsuarioLista | null>(null);
   const [porEliminar, setPorEliminar] = useState<UsuarioLista | null>(null);
 
-  const usuarios = data?.usuarios ?? [];
+  // La expresión data?.usuarios ?? [] vive DENTRO del useMemo: fuera de él,
+  // su «?? []» generaba un array nuevo en cada render (mientras cargan los
+  // datos) y forzaba recálculos del memo en cada render.
   const filtrados = useMemo(() => {
+    const usuarios = data?.usuarios ?? [];
     const q = busqueda.trim().toLowerCase();
     if (!q) return usuarios;
     return usuarios.filter(
@@ -458,7 +461,7 @@ export function GestionUsuarios() {
         u.correo.toLowerCase().includes(q) ||
         (idioma === "es" ? u.rol.nombre : u.rol.nombreEn).toLowerCase().includes(q),
     );
-  }, [usuarios, busqueda, idioma]);
+  }, [data, busqueda, idioma]);
 
   async function alternarActivo() {
     if (!porAlternar) return;

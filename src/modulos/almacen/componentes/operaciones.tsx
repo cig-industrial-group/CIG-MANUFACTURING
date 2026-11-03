@@ -8,7 +8,7 @@
  *   - Registros: gestión de los registros de la sección (consultar,
  *     corregir y eliminar con recálculo de stock y bitácora)
  */
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   PackagePlus,
   ArrowDownToLine,
@@ -209,11 +209,13 @@ function FormularioOperacion({ config }: { config: ConfigOperacion }) {
 
   const productoSel = productos?.find((p) => p.id === productoId) ?? null;
 
-  // Al cambiar de producto (unidad base o empaque distintos) el conteo
-  // se reinicia en su forma natural de captura.
-  useEffect(() => {
-    setConteo(estadoConteoInicial(productoSel));
-  }, [productoId]);
+  // Al cambiar de producto (unidad base o empaque distintos) el conteo se
+  // reinicia en su forma natural de captura. Ambas actualizaciones ocurren
+  // dentro del mismo evento de selección (React las agrupa en un solo render).
+  function seleccionarProducto(id: string) {
+    setProductoId(id);
+    setConteo(estadoConteoInicial(productos?.find((p) => p.id === id) ?? null));
+  }
 
   // Total en unidad base según el modo de captura (directo o paquetes
   // del EMPAQUE CONFIGURADO DEL PRODUCTO)
@@ -400,7 +402,7 @@ function FormularioOperacion({ config }: { config: ConfigOperacion }) {
               <SelectorProducto
                 productos={productosFiltrados}
                 valor={productoId || null}
-                onChange={setProductoId}
+                onChange={seleccionarProducto}
                 stockPorAlmacen={
                   config.requiereOrigen && almacenOrigenId && stockOrigen
                     ? new Map(stockOrigen.map((s) => [s.productoId, s.cantidad]))

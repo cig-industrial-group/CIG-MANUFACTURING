@@ -36,7 +36,12 @@
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],
+  // "examples", "skills" y ".staging" son carpetas del entorno de
+  // desarrollo que no forman parte de la aplicación.
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "examples",
+    "skills",
+    ".staging"
   ]
 }

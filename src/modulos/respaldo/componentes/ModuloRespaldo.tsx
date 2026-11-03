@@ -414,6 +414,8 @@ export function ModuloRespaldo() {
   const [apertura, setApertura] = useState(0);
 
   // ===== Respaldo automático diario (una sola vez por carga del módulo) =====
+  // La referencia autoDisparado garantiza que el disparo ocurra una sola vez:
+  // las dependencias completas solo añaden ejecuciones que retornan de inmediato.
   const autoDisparado = useRef(false);
   useEffect(() => {
     if (autoDisparado.current || isLoading || !data?.autoPendiente) return;
@@ -426,7 +428,7 @@ export function ModuloRespaldo() {
       },
       onError: () => undefined, // silencioso: no interrumpe la operación
     });
-  }, [isLoading, data?.autoPendiente]);
+  }, [isLoading, data?.autoPendiente, auto, t, toast]);
 
   // ===== Cuenta regresiva de la ventana de reversión =====
   const [ahora, setAhora] = useState(() => Date.now());
