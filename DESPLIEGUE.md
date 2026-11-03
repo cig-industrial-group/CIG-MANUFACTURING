@@ -1,6 +1,6 @@
-# Guía de despliegue — FabriFlow
+# Guía de despliegue — CIG-MANUFACTURING
 
-Guía completa para desplegar FabriFlow en tu propio servidor (Linux recomendado;
+Guía completa para desplegar CIG-MANUFACTURING en tu propio servidor (Linux recomendado;
 también aplica a macOS y Windows con WSL).
 
 ---
@@ -22,8 +22,8 @@ también aplica a macOS y Windows con WSL).
 
 ```bash
 # 1. Copia el paquete a tu servidor y descomprímelo
-unzip fabriflow-codigo-fuente.zip
-cd fabriflow
+unzip cig-manufacturing-codigo-fuente.zip
+cd cig-manufacturing
 
 # 2. Da permisos y ejecuta la instalación completa
 chmod +x setup.sh start.sh
@@ -41,8 +41,8 @@ Abre `http://TU_IP:3000` e inicia sesión:
 
 | Correo | Contraseña |
 |---|---|
-| `admin@fabriflow.com` | `Admin*2024` |
-| `ti@fabriflow.com` | `Ti*2024` |
+| `admin@cig-manufacturing.com` | `Admin*2024` |
+| `ti@cig-manufacturing.com` | `Ti*2024` |
 
 > ⚠️ **El paquete ya incluye una base de datos limpia** (`db/custom.db`) con solo roles,
 > usuarios y configuración. `setup.sh` simplemente la verifica y re-siembra si hiciera
@@ -62,14 +62,14 @@ Edita `.env`:
 
 ```ini
 # RUTA ABSOLUTA al archivo de la base de datos en TU servidor
-DATABASE_URL=file:/opt/fabriflow/db/custom.db
+DATABASE_URL=file:/opt/cig-manufacturing/db/custom.db
 
 # Clave aleatoria para firmar sesiones (genera la tuya):
 #   openssl rand -hex 32
 AUTH_SECRET=pega-aqui-tu-clave-aleatoria
 ```
 
-> ⚠️ **`DATABASE_URL` debe ser una ruta absoluta** (`file:/opt/fabriflow/db/custom.db`).
+> ⚠️ **`DATABASE_URL` debe ser una ruta absoluta** (`file:/opt/cig-manufacturing/db/custom.db`).
 > Las rutas relativas no se resuelven correctamente en el modo de producción *standalone*
 > de Next.js + Prisma.
 
@@ -104,33 +104,33 @@ bun run build        # o: npm run build
 
 ```bash
 npm install -g pm2
-cd /opt/fabriflow   # (la ruta donde desplegaste)
+cd /opt/cig-manufacturing   # (la ruta donde desplegaste)
 
-pm2 start start.sh --name fabriflow
+pm2 start start.sh --name cig-manufacturing
 pm2 save
-pm2 startup         # arranca FabriFlow al reiniciar el servidor
+pm2 startup         # arranca CIG-MANUFACTURING al reiniciar el servidor
 ```
 
-Comandos útiles: `pm2 logs fabriflow` · `pm2 restart fabriflow` · `pm2 monit`
+Comandos útiles: `pm2 logs cig-manufacturing` · `pm2 restart cig-manufacturing` · `pm2 monit`
 
 ### Opción B — systemd (sin dependencias externas)
 
-Crea `/etc/systemd/system/fabriflow.service`:
+Crea `/etc/systemd/system/cig-manufacturing.service`:
 
 ```ini
 [Unit]
-Description=FabriFlow — Sistema de Gestión de Fábrica
+Description=CIG-MANUFACTURING — Sistema de Gestión de Fábrica
 After=network.target
 
 [Service]
 Type=simple
 User=www-data
-WorkingDirectory=/opt/fabriflow
-EnvironmentFile=/opt/fabriflow/.env
+WorkingDirectory=/opt/cig-manufacturing
+EnvironmentFile=/opt/cig-manufacturing/.env
 Environment=NODE_ENV=production
 Environment=HOSTNAME=0.0.0.0
 Environment=PORT=3000
-ExecStart=/usr/bin/node /opt/fabriflow/.next/standalone/server.js
+ExecStart=/usr/bin/node /opt/cig-manufacturing/.next/standalone/server.js
 Restart=always
 RestartSec=5
 
@@ -139,10 +139,10 @@ WantedBy=multi-user.target
 ```
 
 ```bash
-sudo chown -R www-data:www-data /opt/fabriflow
+sudo chown -R www-data:www-data /opt/cig-manufacturing
 sudo systemctl daemon-reload
-sudo systemctl enable --now fabriflow
-sudo systemctl status fabriflow
+sudo systemctl enable --now cig-manufacturing
+sudo systemctl status cig-manufacturing
 ```
 
 ### Opción C — Docker
@@ -163,7 +163,7 @@ Para usar el puerto 80/443 con dominio propio:
 ```nginx
 server {
     listen 80;
-    server_name fabriflow.tuempresa.com;
+    server_name cig-manufacturing.tuempresa.com;
 
     location / {
         proxy_pass http://127.0.0.1:3000;
@@ -178,12 +178,12 @@ server {
 }
 ```
 
-Con HTTPS (Let's Encrypt): `sudo certbot --nginx -d fabriflow.tuempresa.com`
+Con HTTPS (Let's Encrypt): `sudo certbot --nginx -d cig-manufacturing.tuempresa.com`
 
 ### Caddy (más simple, HTTPS automático)
 
 ```
-fabriflow.tuempresa.com {
+cig-manufacturing.tuempresa.com {
     reverse_proxy 127.0.0.1:3000
 }
 ```
@@ -196,30 +196,30 @@ fabriflow.tuempresa.com {
 La base de datos completa es **un solo archivo**. Para respaldarla en caliente:
 
 ```bash
-sqlite3 /opt/fabriflow/db/custom.db ".backup '/backups/fabriflow-$(date +%F).db'"
+sqlite3 /opt/cig-manufacturing/db/custom.db ".backup '/backups/cig-manufacturing-$(date +%F).db'"
 ```
 
 O en frío (servidor detenido), simplemente copia el archivo:
 
 ```bash
-cp db/custom.db /backups/fabriflow-$(date +%F).db
+cp db/custom.db /backups/cig-manufacturing-$(date +%F).db
 ```
 
 Para restaurar: detén el servidor, reemplaza `db/custom.db` y arranca de nuevo.
 Recomendación: respaldo diario con `cron`:
 
 ```
-0 2 * * * sqlite3 /opt/fabriflow/db/custom.db ".backup '/backups/fabriflow-$(date +\%F).db'"
+0 2 * * * sqlite3 /opt/cig-manufacturing/db/custom.db ".backup '/backups/cig-manufacturing-$(date +\%F).db'"
 ```
 
 ## 8. Actualizar a una nueva versión del código
 
 ```bash
-cd /opt/fabriflow
-pm2 stop fabriflow                # o: sudo systemctl stop fabriflow
+cd /opt/cig-manufacturing
+pm2 stop cig-manufacturing                # o: sudo systemctl stop cig-manufacturing
 
 # Reemplaza el código fuente por la nueva versión
-# (por ejemplo: unzip -o fabriflow-codigo-fuente.zip)
+# (por ejemplo: unzip -o cig-manufacturing-codigo-fuente.zip)
 # Conserva tu .env y tu db/custom.db actuales
 
 bun install          # o npm install
@@ -238,7 +238,7 @@ bun scripts/migrar-papelera.ts        # o: npx tsx scripts/migrar-papelera.ts
 
 bun run build        # o npm run build
 
-pm2 start fabriflow  # o: sudo systemctl start fabriflow
+pm2 start cig-manufacturing  # o: sudo systemctl start cig-manufacturing
 ```
 
 ## 9. Solución de problemas
@@ -255,7 +255,7 @@ pm2 start fabriflow  # o: sudo systemctl start fabriflow
 
 ## 10. Seguridad en producción (checklist)
 
-- [ ] Cambiar las contraseñas de `admin@fabriflow.com` y `ti@fabriflow.com`
+- [ ] Cambiar las contraseñas de `admin@cig-manufacturing.com` y `ti@cig-manufacturing.com`
 - [ ] `AUTH_SECRET` aleatorio y único (lo genera `setup.sh`)
 - [ ] Deshabilitar el autoregistro si no lo necesitas (Sistema → Ajustes)
 - [ ] HTTPS si hay acceso desde Internet

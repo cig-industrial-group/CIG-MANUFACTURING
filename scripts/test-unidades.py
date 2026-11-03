@@ -84,11 +84,11 @@ def stock(producto_id, almacen_id):
 
 
 print("=" * 64)
-print("E2E UNIDADES DE MEDIDA (factor por producto) — FabriFlow v1.0.0")
+print("E2E UNIDADES DE MEDIDA (factor por producto) — CIG-MANUFACTURING v1.0.0")
 print("=" * 64)
 
 # ===== Sesión =====
-sc, _ = req("POST", "/api/auth/login", {"correo": "admin@fabriflow.com", "password": "Admin*2024"})
+sc, _ = req("POST", "/api/auth/login", {"correo": "admin@cig-manufacturing.com", "password": "Admin*2024"})
 check("login admin", sc == 200, sc)
 
 # ===== 1. Catálogo sembrado =====

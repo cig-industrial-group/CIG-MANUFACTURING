@@ -1,5 +1,5 @@
 # ============================================================
-# CI — CIG-MANUFACTURING (FabriFlow v1.0.0)
+# CI — CIG-MANUFACTURING v1.0.0
 #
 # Pipeline quirúrgico que se ejecuta en cada push (cualquier rama) y PR:
 #   1. Guardia  → typescript.ignoreBuildErrors (y eslint.ignoreDuringBuilds)
@@ -135,7 +135,7 @@ jobs:
           # b) Login real contra la BD sembrada
           LOGIN=$(curl -sf -c /tmp/cookies-ci.txt -X POST "http://127.0.0.1:3100/api/auth/login" \
             -H "Content-Type: application/json" \
-            -d '{"correo":"admin@fabriflow.com","password":"Admin*2024"}')
+            -d '{"correo":"admin@cig-manufacturing.com","password":"Admin*2024"}')
           echo "POST /api/auth/login -> $(echo "$LOGIN" | head -c 200)"
           echo "$LOGIN" | grep -q '"usuario"' \
             || { echo "::error::El login no devolvió un usuario"; exit 1; }
@@ -143,7 +143,7 @@ jobs:
           # c) La cookie de sesión firmada (JWT) autentica
           SESION=$(curl -sf -b /tmp/cookies-ci.txt "http://127.0.0.1:3100/api/auth/sesion")
           echo "GET /api/auth/sesion -> $(echo "$SESION" | head -c 200)"
-          echo "$SESION" | grep -q 'admin@fabriflow.com' \
+          echo "$SESION" | grep -q 'admin@cig-manufacturing.com' \
             || { echo "::error::La cookie de sesión no autentica"; exit 1; }
 
           echo "Humo completo: arranque, API, login y sesión OK"

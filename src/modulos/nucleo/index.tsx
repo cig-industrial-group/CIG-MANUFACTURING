@@ -52,7 +52,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-const CLAVE_SECCION = "fabriflow.seccion";
+const CLAVE_SECCION = "cig-manufacturing.seccion";
 
 // ============================================================
 // MARCA / LOGOTIPO

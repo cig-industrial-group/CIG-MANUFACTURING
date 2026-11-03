@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# FabriFlow — Arranque en producción (servidor standalone)
+# CIG-MANUFACTURING — Arranque en producción (servidor standalone)
 #
 # Uso:   ./start.sh           (puerto 3000)
 #        PORT=8080 ./start.sh (otro puerto)
@@ -39,5 +39,5 @@ export HOSTNAME="${BIND_HOST:-0.0.0.0}"
 export PORT="${PORT:-3000}"
 export NODE_ENV=production
 
-echo "▶ FabriFlow escuchando en http://$HOSTNAME:$PORT"
+echo "▶ CIG-MANUFACTURING escuchando en http://$HOSTNAME:$PORT"
 exec node "$SERVER_JS"

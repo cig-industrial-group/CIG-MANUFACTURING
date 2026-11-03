@@ -21,7 +21,7 @@ import {
   type TipoIdioma,
 } from "./diccionario";
 
-const CLAVE_STORAGE = "fabriflow.idioma";
+const CLAVE_STORAGE = "cig-manufacturing.idioma";
 
 type CtxIdioma = {
   idioma: TipoIdioma;

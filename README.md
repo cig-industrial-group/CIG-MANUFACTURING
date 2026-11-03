@@ -1,4 +1,4 @@
-# FabriFlow — Sistema de Gestión de Fábrica
+# CIG-MANUFACTURING — Sistema de Gestión de Fábrica
 
 Sistema web bilingüe (Español / Inglés) para el control y la gestión de almacén de fábrica:
 inventario multi-almacén, entradas, recepción de materia prima, salidas, traslados, ajustes,
@@ -37,8 +37,8 @@ usuarios, roles y permisos.
 
 | Correo | Contraseña | Rol |
 |---|---|---|
-| `admin@fabriflow.com` | `Admin*2024` | Administrador |
-| `ti@fabriflow.com` | `Ti*2024` | TI |
+| `admin@cig-manufacturing.com` | `Admin*2024` | Administrador |
+| `ti@cig-manufacturing.com` | `Ti*2024` | TI |
 
 > ⚠️ **Cambia estas contraseñas inmediatamente después del primer inicio de sesión.**
 
@@ -53,7 +53,7 @@ usuarios, roles y permisos.
 ## Estructura del proyecto
 
 ```
-fabriflow/
+cig-manufacturing/
 ├── prisma/
 │   ├── schema.prisma        # Modelo de datos (9 tablas)
 │   └── seed.ts              # Semilla: roles, usuarios y configuración
@@ -117,4 +117,4 @@ Variables de entorno: ver [`.env.example`](./.env.example).
 
 ## Licencia
 
-Uso interno — FabriFlow. Todos los derechos reservados.
+Uso interno — CIG-MANUFACTURING. Todos los derechos reservados.

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-VERIFICACIÓN END-TO-END DEL MÓDULO CLIENTES (FabriFlow v1.0.0)
+VERIFICACIÓN END-TO-END DEL MÓDULO CLIENTES (CIG-MANUFACTURING v1.0.0)
 
 Arranca el servidor standalone en el puerto 3300, ejecuta la batería de
 pruebas contra las APIs reales y lo apaga al terminar. Todo ocurre en un
@@ -83,14 +83,14 @@ def main():
     # ===== Arranque del servidor (standalone, puerto 3300) =====
     env = dict(os.environ)
     env.update({"PORT": "3300", "HOSTNAME": "0.0.0.0"})
-    log = open("/tmp/fabriflow-test-clientes.log", "w")
+    log = open("/tmp/cig-manufacturing-test-clientes.log", "w")
     proc = subprocess.Popen(
         ["bash", "start.sh"], cwd=PROYECTO, env=env,
         stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
     )
     try:
         if not esperar_servidor():
-            print("✘ El servidor no respondió en 90s; log en /tmp/fabriflow-test-clientes.log")
+            print("✘ El servidor no respondió en 90s; log en /tmp/cig-manufacturing-test-clientes.log")
             return 2
         return pruebas()
     finally:
@@ -107,7 +107,7 @@ def pruebas():
 
     print("\n=== 0. Limpieza de restos de ejecuciones previas ===")
     cod, _ = admin.req("POST", "/api/auth/login",
-                       {"correo": "admin@fabriflow.com", "password": "Admin*2024"})
+                       {"correo": "admin@cig-manufacturing.com", "password": "Admin*2024"})
     check("Login admin", 200, cod)
     cod, lista = admin.req("GET", "/api/clientes?incluirInactivos=true")
     for c in lista:
@@ -348,14 +348,14 @@ def pruebas():
 
     if operador:
         cod, cuerpo = admin.req("POST", "/api/usuarios", {
-            "nombre": "Prueba Permisos", "correo": "permisos.test@fabriflow.com",
+            "nombre": "Prueba Permisos", "correo": "permisos.test@cig-manufacturing.com",
             "password": "Permisos*2026", "rolId": operador["id"],
         })
         check("Crear usuario de prueba con rol OPERADOR", 201, cod)
         uid = cuerpo.get("usuario", {}).get("id")
         op = Sesion()
         cod, _ = op.req("POST", "/api/auth/login",
-                        {"correo": "permisos.test@fabriflow.com", "password": "Permisos*2026"})
+                        {"correo": "permisos.test@cig-manufacturing.com", "password": "Permisos*2026"})
         check("Login del usuario de prueba", 200, cod)
         cod, _ = op.req("GET", "/api/clientes")
         check("OPERADOR: GET /api/clientes → 403 (sin clientes.ver)", 403, cod)
@@ -368,7 +368,7 @@ def pruebas():
         admin.req("DELETE", f"/api/usuarios/{uid}")
         cod, papelera = admin.req("GET", "/api/papelera")
         for e in papelera.get("entradas", []):
-            if e["entidad"] == "USUARIO" and e["identificador"] == "permisos.test@fabriflow.com":
+            if e["entidad"] == "USUARIO" and e["identificador"] == "permisos.test@cig-manufacturing.com":
                 cod, _ = admin.req("DELETE", f"/api/papelera/{e['id']}")
                 check("Purga del usuario de prueba", 200, cod)
 

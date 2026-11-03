@@ -1,9 +1,9 @@
 #!/bin/bash
-# Empaqueta el código fuente de FabriFlow v1.0.0 en download/
-# (zip + tar.gz, estructura fabriflow/, sin dependencias ni bases de datos)
+# Empaqueta el código fuente de CIG-MANUFACTURING v1.0.0 en download/
+# (zip + tar.gz, estructura cig-manufacturing/, sin dependencias ni bases de datos)
 set -e
 cd /home/z/my-project
-rm -rf /tmp/fabriflow-pkg && mkdir -p /tmp/fabriflow-pkg/fabriflow
+rm -rf /tmp/cig-manufacturing-pkg && mkdir -p /tmp/cig-manufacturing-pkg/cig-manufacturing
 
 # Copia del proyecto excluyendo artefactos no distribuibles
 rsync -a --quiet \
@@ -24,14 +24,14 @@ rsync -a --quiet \
   --exclude '.git' \
   --exclude '.staging' \
   --exclude '.zscripts' \
-  ./ /tmp/fabriflow-pkg/fabriflow/
+  ./ /tmp/cig-manufacturing-pkg/cig-manufacturing/
 
-cd /tmp/fabriflow-pkg
-rm -f /home/z/my-project/download/fabriflow-codigo-fuente.zip
-rm -f /home/z/my-project/download/fabriflow-codigo-fuente.tar.gz
-zip -r -q /home/z/my-project/download/fabriflow-codigo-fuente.zip fabriflow
-tar -czf /home/z/my-project/download/fabriflow-codigo-fuente.tar.gz fabriflow
+cd /tmp/cig-manufacturing-pkg
+rm -f /home/z/my-project/download/cig-manufacturing-codigo-fuente.zip
+rm -f /home/z/my-project/download/cig-manufacturing-codigo-fuente.tar.gz
+zip -r -q /home/z/my-project/download/cig-manufacturing-codigo-fuente.zip cig-manufacturing
+tar -czf /home/z/my-project/download/cig-manufacturing-codigo-fuente.tar.gz cig-manufacturing
 
 echo "=== Empaquetado completo ==="
-unzip -l /home/z/my-project/download/fabriflow-codigo-fuente.zip | tail -2
+unzip -l /home/z/my-project/download/cig-manufacturing-codigo-fuente.zip | tail -2
 ls -la /home/z/my-project/download/

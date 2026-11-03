@@ -112,7 +112,7 @@ def sql_directo(sentencias):
 
 
 print("════════ 1. SESIÓN Y ESTADO INICIAL ════════")
-sc, _ = req("POST", "/api/auth/login", {"correo": "admin@fabriflow.com", "password": "Admin*2024"})
+sc, _ = req("POST", "/api/auth/login", {"correo": "admin@cig-manufacturing.com", "password": "Admin*2024"})
 check("login admin", sc == 200, f"status={sc}")
 
 sc, estado = req("GET", "/api/respaldo")
@@ -279,13 +279,13 @@ usuario_prueba_id = None
 if rol_almacenero:
     sc, creado = req("POST", "/api/usuarios", {
         "nombre": "Prueba Respaldo",
-        "correo": "respaldo.test@fabriflow.com",
+        "correo": "respaldo.test@cig-manufacturing.com",
         "password": "Permisos*2026",
         "rolId": rol_almacenero["id"],
     })
     usuario_prueba_id = creado.get("usuario", {}).get("id") if sc == 201 else None
     cookie = None
-    sc, _ = req("POST", "/api/auth/login", {"correo": "respaldo.test@fabriflow.com", "password": "Permisos*2026"})
+    sc, _ = req("POST", "/api/auth/login", {"correo": "respaldo.test@cig-manufacturing.com", "password": "Permisos*2026"})
     if sc == 200:
         sc, _ = req("GET", "/api/respaldo")
         check("ALMACENERO sin respaldo.gestionar → 403", sc == 403, f"status={sc}")
@@ -472,13 +472,13 @@ if rol_almacenero:
     cookie_admin = cookie
     sc, creado = req("POST", "/api/usuarios", {
         "nombre": "Prueba Subida",
-        "correo": "subida.test@fabriflow.com",
+        "correo": "subida.test@cig-manufacturing.com",
         "password": "Permisos*2026",
         "rolId": rol_almacenero["id"],
     })
     usuario_subida_id = creado.get("usuario", {}).get("id") if sc == 201 else None
     cookie = None
-    sc, _ = req("POST", "/api/auth/login", {"correo": "subida.test@fabriflow.com", "password": "Permisos*2026"})
+    sc, _ = req("POST", "/api/auth/login", {"correo": "subida.test@cig-manufacturing.com", "password": "Permisos*2026"})
     if sc == 200:
         sc, resp = subir_multipart("sin-permiso.db", bytes_respaldo if objetivo else b"SQLite format 3\x00")
         check("ALMACENERO sin respaldo.gestionar: subida → 403", sc == 403, f"status={sc} cuerpo={resp}")

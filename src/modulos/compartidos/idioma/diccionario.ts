@@ -14,7 +14,7 @@ export const LOCALES: Record<TipoIdioma, string> = {
 export const diccionario = {
   es: {
     app: {
-      nombre: "FabriFlow",
+      nombre: "CIG-MANUFACTURING",
       eslogan: "Sistema de Gestión de Fábrica",
       modulo: "Módulo",
       modulos: "Módulos",
@@ -901,7 +901,7 @@ export const diccionario = {
 
   en: {
     app: {
-      nombre: "FabriFlow",
+      nombre: "CIG-MANUFACTURING",
       eslogan: "Factory Management System",
       modulo: "Module",
       modulos: "Modules",
