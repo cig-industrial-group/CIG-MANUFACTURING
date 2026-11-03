@@ -17,9 +17,8 @@ next-env.d.ts
 .env.*
 !.env.example
 
-# Base de datos local
-db/*.db
-db/*.db-journal
+# Base de datos local (datos en tiempo de ejecución: nunca al repositorio)
+db/
 
 # Registros y temporales
 *.log

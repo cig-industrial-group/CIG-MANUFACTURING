@@ -4,7 +4,7 @@
  * INVENTARIO — Existencias en tiempo real
  * Vista por almacén y vista por producto, con ajuste de stock (conteo físico).
  */
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Boxes, History, Search, SlidersHorizontal } from "lucide-react";
 import { useIdioma, useFormateadores } from "@/modulos/compartidos/idioma";
 import {
@@ -135,11 +135,15 @@ export function Inventario() {
   }
 
   // Al cambiar de producto (unidad base o empaque distintos) el conteo
-  // se reinicia en su forma natural de captura.
-  useEffect(() => {
+  // se reinicia en su forma natural de captura. El ajuste se hace durante
+  // el render (patrón recomendado por React para restablecer estado cuando
+  // cambia otro valor) en vez de dentro de un useEffect, donde el setState
+  // síncrono provoca renders en cascada.
+  const [conteoAjusteProductoId, setConteoAjusteProductoId] = useState(productoAjuste?.id);
+  if (conteoAjusteProductoId !== productoAjuste?.id) {
+    setConteoAjusteProductoId(productoAjuste?.id);
     setConteoAjuste(estadoConteoInicial(productoAjuste));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productoAjuste?.id]);
+  }
 
   // Total del ajuste en unidad base según el modo de captura (directo o
   // paquetes del EMPAQUE CONFIGURADO DEL PRODUCTO)

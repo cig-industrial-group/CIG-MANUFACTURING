@@ -8,7 +8,7 @@
  *   - Registros: gestión de los registros de la sección (consultar,
  *     corregir y eliminar con recálculo de stock y bitácora)
  */
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   PackagePlus,
   ArrowDownToLine,
@@ -210,10 +210,15 @@ function FormularioOperacion({ config }: { config: ConfigOperacion }) {
   const productoSel = productos?.find((p) => p.id === productoId) ?? null;
 
   // Al cambiar de producto (unidad base o empaque distintos) el conteo
-  // se reinicia en su forma natural de captura.
-  useEffect(() => {
+  // se reinicia en su forma natural de captura. El ajuste se hace durante
+  // el render (patrón recomendado por React para restablecer estado cuando
+  // cambia otro valor) en vez de dentro de un useEffect, donde el setState
+  // síncrono provoca renders en cascada.
+  const [conteoProductoId, setConteoProductoId] = useState(productoId);
+  if (conteoProductoId !== productoId) {
+    setConteoProductoId(productoId);
     setConteo(estadoConteoInicial(productoSel));
-  }, [productoId]);
+  }
 
   // Total en unidad base según el modo de captura (directo o paquetes
   // del EMPAQUE CONFIGURADO DEL PRODUCTO)
