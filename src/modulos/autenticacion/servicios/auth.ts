@@ -9,11 +9,11 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import type { UsuarioSesion } from "../tipos";
 
-export const COOKIE_SESION = "fabriflow_sesion";
+export const COOKIE_SESION = "cig_manufacturing_sesion";
 const DURACION_SESION_SEG = 60 * 60 * 24 * 7; // 7 días
 
 const secreto = new TextEncoder().encode(
-  process.env.AUTH_SECRET ?? "fabriflow-secreto-desarrollo-2024-cambiar-en-produccion",
+  process.env.AUTH_SECRET ?? "cig-manufacturing-secreto-desarrollo-2024-cambiar-en-produccion",
 );
 
 // ===== Contraseñas =====

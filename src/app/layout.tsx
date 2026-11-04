@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "FabriFlow — Sistema de Gestión de Fábrica | Factory Management System",
+  title: "CIG-MANUFACTURING — Sistema de Gestión de Fábrica | Factory Management System",
   description:
     "Control y gestión de almacén: inventario, entradas, salidas, traslados, recepción de materia prima e historial de movimientos. Bilingüe ES/EN. | Warehouse management: inventory, inbound, outbound, transfers, raw material reception and movement history. Bilingual ES/EN.",
   keywords: [

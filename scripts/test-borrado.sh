@@ -47,7 +47,7 @@ COD=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/catalogo/modelos")
 
 COD=$(curl -s -c "$CJ" -o /tmp/ff-login.json -w "%{http_code}" -X POST "$BASE/api/auth/login" \
   -H "Content-Type: application/json" \
-  -d '{"correo":"admin@fabriflow.com","password":"Admin*2024"}')
+  -d '{"correo":"admin@cig-manufacturing.com","password":"Admin*2024"}')
 [ "$COD" = "200" ] && ok "Login admin (200)" || { mal "Login admin ($COD)"; cat /tmp/ff-login.json; }
 ADMIN_ID=$(jv /tmp/ff-login.json "['usuario']['id']")
 
@@ -161,14 +161,14 @@ RID=$(curl -s -b "$CJ" "$BASE/api/roles" | python3 -c "import sys,json; print(ne
 
 COD=$(curl -s -b "$CJ" -o /tmp/ff-u2.json -w "%{http_code}" -X POST "$BASE/api/usuarios" \
   -H "Content-Type: application/json" \
-  -d "{\"nombre\":\"Temporal E2E\",\"correo\":\"temp.e2e@fabriflow.com\",\"rolId\":\"$RID\",\"password\":\"Temporal*2024\",\"debeCambiarPassword\":false}")
+  -d "{\"nombre\":\"Temporal E2E\",\"correo\":\"temp.e2e@cig-manufacturing.com\",\"rolId\":\"$RID\",\"password\":\"Temporal*2024\",\"debeCambiarPassword\":false}")
 [ "$COD" = "201" ] && ok "Crear usuario temporal ALMACENERO (201)" || { mal "Crear usuario ($COD)"; cat /tmp/ff-u2.json; }
 U2=$(jv /tmp/ff-u2.json "['usuario']['id']")
 
 # El usuario sin permiso catalogo.gestionar recibe 403
 COD=$(curl -s -c "$CJ2" -o /dev/null -w "%{http_code}" -X POST "$BASE/api/auth/login" \
   -H "Content-Type: application/json" \
-  -d '{"correo":"temp.e2e@fabriflow.com","password":"Temporal*2024"}')
+  -d '{"correo":"temp.e2e@cig-manufacturing.com","password":"Temporal*2024"}')
 [ "$COD" = "200" ] && ok "Login usuario temporal" || mal "Login temporal ($COD)"
 
 COD=$(curl -s -b "$CJ2" -o /tmp/ff-err.json -w "%{http_code}" -X POST "$BASE/api/catalogo/modelos" \
@@ -212,7 +212,7 @@ COD=$(curl -s -b "$CJ" -o /dev/null -w "%{http_code}" -X DELETE "$BASE/api/almac
 COD=$(curl -s -b "$CJ" -o /dev/null -w "%{http_code}" -X DELETE "$BASE/api/usuarios/$U2")
 [ "$COD" = "200" ] && ok "Usuario temporal eliminado tras limpiar sus registros" || mal "Eliminar usuario temporal ($COD)"
 
-ESTA=$(curl -s -b "$CJ" "$BASE/api/usuarios" | python3 -c "import sys,json; print(any(u['correo']=='temp.e2e@fabriflow.com' for u in json.load(sys.stdin)['usuarios']))")
+ESTA=$(curl -s -b "$CJ" "$BASE/api/usuarios" | python3 -c "import sys,json; print(any(u['correo']=='temp.e2e@cig-manufacturing.com' for u in json.load(sys.stdin)['usuarios']))")
 [ "$ESTA" = "False" ] && ok "Usuario borrado de la BD" || mal "El usuario sigue existiendo"
 
 # ---------- Resumen ----------

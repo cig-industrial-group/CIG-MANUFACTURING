@@ -97,8 +97,8 @@ const USUARIOS: Array<{
   password: string;
   rolClave: string;
 }> = [
-  { nombre: "Administrador del Sistema", correo: "admin@fabriflow.com", password: "Admin*2024", rolClave: "ADMIN" },
-  { nombre: "Departamento de TI", correo: "ti@fabriflow.com", password: "Ti*2024", rolClave: "TI" },
+  { nombre: "Administrador del Sistema", correo: "admin@cig-manufacturing.com", password: "Admin*2024", rolClave: "ADMIN" },
+  { nombre: "Departamento de TI", correo: "ti@cig-manufacturing.com", password: "Ti*2024", rolClave: "TI" },
 ];
 
 const CONFIGURACION: Record<string, string> = {

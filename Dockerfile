@@ -1,7 +1,7 @@
 # ============================================================
-# FabriFlow — Imagen de producción con Bun
-# Build:   docker build -t fabriflow .
-# Run:     docker run -d -p 3000:3000 -v fabriflow-data:/data -e AUTH_SECRET=$(openssl rand -hex 32) fabriflow
+# CIG-MANUFACTURING — Imagen de producción con Bun
+# Build:   docker build -t cig-manufacturing .
+# Run:     docker run -d -p 3000:3000 -v cig-manufacturing-data:/data -e AUTH_SECRET=$(openssl rand -hex 32) cig-manufacturing
 # ============================================================
 FROM oven/bun:1.2
 
@@ -23,7 +23,7 @@ RUN bun run build
 ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     PORT=3000 \
-    DATABASE_URL=file:/data/fabriflow.db
+    DATABASE_URL=file:/data/cig-manufacturing.db
 
 VOLUME /data
 EXPOSE 3000

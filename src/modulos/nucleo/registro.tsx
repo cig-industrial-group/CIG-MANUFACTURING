@@ -222,7 +222,7 @@ export const MODULOS: Array<
 // ============================================================
 // ALMACÉN DE MÓDULO ACTIVO (Zustand)
 // ============================================================
-const CLAVE_MODULO = "fabriflow.modulo";
+const CLAVE_MODULO = "cig-manufacturing.modulo";
 
 interface EstadoModulo {
   moduloId: string;

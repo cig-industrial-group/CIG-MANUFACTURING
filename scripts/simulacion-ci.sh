@@ -75,12 +75,12 @@ echo "  ✔ API viva"
 
 LOGIN=$(curl -sf -c "$DIR_TMP/cookies.txt" -X POST "http://127.0.0.1:$PUERTO/api/auth/login" \
   -H "Content-Type: application/json" \
-  -d '{"correo":"admin@fabriflow.com","password":"Admin*2024"}')
+  -d '{"correo":"admin@cig-manufacturing.com","password":"Admin*2024"}')
 echo "$LOGIN" | grep -q '"usuario"' || fallo "el login no devolvió un usuario"
-echo "  ✔ login real OK (admin@fabriflow.com)"
+echo "  ✔ login real OK (admin@cig-manufacturing.com)"
 
 SESION=$(curl -sf -b "$DIR_TMP/cookies.txt" "http://127.0.0.1:$PUERTO/api/auth/sesion")
-echo "$SESION" | grep -q 'admin@fabriflow.com' || fallo "la cookie de sesión no autentica"
+echo "$SESION" | grep -q 'admin@cig-manufacturing.com' || fallo "la cookie de sesión no autentica"
 echo "  ✔ sesión con cookie firmada OK"
 
 echo ""

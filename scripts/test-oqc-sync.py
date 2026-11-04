@@ -88,7 +88,7 @@ def mov_db(mov_id):
 # FASE 1 — Sesión y datos base
 # ============================================================
 print("\n== FASE 1: sesión y datos base ==")
-sc, _ = req("POST", "/api/auth/login", {"correo": "admin@fabriflow.com", "password": "Admin*2024"})
+sc, _ = req("POST", "/api/auth/login", {"correo": "admin@cig-manufacturing.com", "password": "Admin*2024"})
 check("login admin", sc == 200, f"status={sc}")
 
 cliente = cur.execute("SELECT id, nombre FROM Cliente ORDER BY nombre LIMIT 1").fetchone()

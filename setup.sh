@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# FabriFlow — Instalación y preparación para producción
+# CIG-MANUFACTURING — Instalación y preparación para producción
 #
 # Uso:   ./setup.sh
 #
@@ -91,7 +91,7 @@ echo "  Iniciar en producción:   ./start.sh"
 echo "  Modo desarrollo:         ${EJECUTAR} run dev   (o bun run dev)"
 echo ""
 echo -e "${AMAR}Cuentas iniciales (cambia las contraseñas al entrar):${SIN}"
-echo "    admin@fabriflow.com  /  Admin*2024   (Administrador)"
-echo "    ti@fabriflow.com     /  Ti*2024      (Departamento de TI)"
+echo "    admin@cig-manufacturing.com  /  Admin*2024   (Administrador)"
+echo "    ti@cig-manufacturing.com     /  Ti*2024      (Departamento de TI)"
 echo ""
 echo "  Consulta DESPLIEGUE.md para PM2, systemd, Nginx y Docker."
