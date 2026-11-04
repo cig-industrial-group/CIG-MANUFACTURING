@@ -1,5 +1,8 @@
 # CIG-MANUFACTURING — Sistema de Gestión de Fábrica
 
+> ⚖️ **AVISO LEGAL:** Copyright © 2026 Emmanuel Caballero De La Rosa. Todos los derechos reservados.  
+> Tijuana, Baja California, México. Este proyecto es propiedad privada y confidencial. Queda prohibida su reproducción, distribución o uso no autorizado sin permiso explícito por escrito.
+
 Sistema web bilingüe (Español / Inglés) para el control y la gestión de almacén de fábrica:
 inventario multi-almacén, entradas, recepción de materia prima, salidas, traslados, ajustes,
 historial de movimientos con bitácora de correcciones, códigos QR, y administración de

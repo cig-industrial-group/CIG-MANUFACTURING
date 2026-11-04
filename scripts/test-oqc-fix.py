@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+# ============================================================================
+# PROYECTO: CIG.MANUFACTURING
+# COPYRIGHT: © 2026 Emmanuel Caballero De La Rosa. Todos los derechos reservados.
+# UBICACIÓN: Tijuana, Baja California, México
+# LICENCIA: Propietaria y Confidencial. Uso no autorizado estrictamente prohibido.
+# CONTACTO: caballeroemanuel966@gmail.com
+# ============================================================================
+
 """E2E del fix de folios monotónicos + bitácora ligada por salidaId (opción B).
 
 Reproduce el escenario EXACTO reportado por el usuario: con folios SAL-*

@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+# ============================================================================
+# PROYECTO: CIG.MANUFACTURING
+# COPYRIGHT: © 2026 Emmanuel Caballero De La Rosa. Todos los derechos reservados.
+# UBICACIÓN: Tijuana, Baja California, México
+# LICENCIA: Propietaria y Confidencial. Uso no autorizado estrictamente prohibido.
+# CONTACTO: caballeroemanuel966@gmail.com
+# ============================================================================
+
 """
 VERIFICACIÓN END-TO-END DEL MÓDULO CLIENTES (CIG-MANUFACTURING v1.0.0)
 
