@@ -1,3 +1,13 @@
+/**
+ * ============================================================================
+ * PROYECTO: CIG.MANUFACTURING
+ * COPYRIGHT: © 2026 Emmanuel Caballero De La Rosa. Todos los derechos reservados.
+ * UBICACIÓN: Tijuana, Baja California, México
+ * LICENCIA: Propietaria y Confidencial. Uso no autorizado estrictamente prohibido.
+ * CONTACTO: caballeroemanuel966@gmail.com
+ * ============================================================================
+ */
+
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"

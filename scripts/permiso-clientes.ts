@@ -1,4 +1,14 @@
 /**
+ * ============================================================================
+ * PROYECTO: CIG.MANUFACTURING
+ * COPYRIGHT: © 2026 Emmanuel Caballero De La Rosa. Todos los derechos reservados.
+ * UBICACIÓN: Tijuana, Baja California, México
+ * LICENCIA: Propietaria y Confidencial. Uso no autorizado estrictamente prohibido.
+ * CONTACTO: caballeroemanuel966@gmail.com
+ * ============================================================================
+ */
+
+/**
  * MIGRACIÓN PUNTUAL (v1.0.0): habilita el módulo de Clientes en la base
  * de datos existente:
  *   1. Crea el rol OQC (Calidad de Salida) si no existe.

@@ -1,4 +1,14 @@
 /**
+ * ============================================================================
+ * PROYECTO: CIG.MANUFACTURING
+ * COPYRIGHT: © 2026 Emmanuel Caballero De La Rosa. Todos los derechos reservados.
+ * UBICACIÓN: Tijuana, Baja California, México
+ * LICENCIA: Propietaria y Confidencial. Uso no autorizado estrictamente prohibido.
+ * CONTACTO: caballeroemanuel966@gmail.com
+ * ============================================================================
+ */
+
+/**
  * SERVICIO HTTP DEL MÓDULO OQC (cliente)
  * Centraliza las peticiones al backend y traduce errores.
  */

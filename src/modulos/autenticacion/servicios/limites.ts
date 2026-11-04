@@ -1,4 +1,14 @@
 /**
+ * ============================================================================
+ * PROYECTO: CIG.MANUFACTURING
+ * COPYRIGHT: © 2026 Emmanuel Caballero De La Rosa. Todos los derechos reservados.
+ * UBICACIÓN: Tijuana, Baja California, México
+ * LICENCIA: Propietaria y Confidencial. Uso no autorizado estrictamente prohibido.
+ * CONTACTO: caballeroemanuel966@gmail.com
+ * ============================================================================
+ */
+
+/**
  * MÓDULO: AUTENTICACIÓN — Límites de intentos (anti-fuerza bruta)
  *
  * Limitador en memoria por clave arbitraria (IP, cuenta de correo o

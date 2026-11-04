@@ -1,4 +1,12 @@
 #!/bin/bash
+# ============================================================================
+# PROYECTO: CIG.MANUFACTURING
+# COPYRIGHT: © 2026 Emmanuel Caballero De La Rosa. Todos los derechos reservados.
+# UBICACIÓN: Tijuana, Baja California, México
+# LICENCIA: Propietaria y Confidencial. Uso no autorizado estrictamente prohibido.
+# CONTACTO: caballeroemanuel966@gmail.com
+# ============================================================================
+
 # ============================================================
 # PRUEBAS E2E v1.0.0 — Borrado real + desactivar/reactivar
 # Ejecuta el servidor standalone y valida el comportamiento

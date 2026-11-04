@@ -1,4 +1,14 @@
 /**
+ * ============================================================================
+ * PROYECTO: CIG.MANUFACTURING
+ * COPYRIGHT: © 2026 Emmanuel Caballero De La Rosa. Todos los derechos reservados.
+ * UBICACIÓN: Tijuana, Baja California, México
+ * LICENCIA: Propietaria y Confidencial. Uso no autorizado estrictamente prohibido.
+ * CONTACTO: caballeroemanuel966@gmail.com
+ * ============================================================================
+ */
+
+/**
  * MIGRACIÓN PUNTUAL (v1.0.0): habilita el módulo OQC en la base de
  * datos existente:
  *   1. Retira el permiso «salidas.liberar» (sustituido por oqc.liberar).

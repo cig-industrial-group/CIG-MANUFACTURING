@@ -1,4 +1,14 @@
 /**
+ * ============================================================================
+ * PROYECTO: CIG.MANUFACTURING
+ * COPYRIGHT: © 2026 Emmanuel Caballero De La Rosa. Todos los derechos reservados.
+ * UBICACIÓN: Tijuana, Baja California, México
+ * LICENCIA: Propietaria y Confidencial. Uso no autorizado estrictamente prohibido.
+ * CONTACTO: caballeroemanuel966@gmail.com
+ * ============================================================================
+ */
+
+/**
  * MÓDULO: AUTENTICACIÓN — Validación de secretos de firmado
  *
  * Política de AUTH_SECRET (secreto HS256 con el que se firman las sesiones):
