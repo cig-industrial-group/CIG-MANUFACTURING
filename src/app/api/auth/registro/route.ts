@@ -8,13 +8,28 @@ import {
   hashearPassword,
 } from "@/modulos/autenticacion/servicios/auth";
 import { obtenerBanderasAuth, obtenerRolRegistro } from "@/modulos/autenticacion/servicios/configuracion";
+import {
+  POLITICAS,
+  estaBloqueada,
+  ipPeticion,
+  msRestantes,
+  registrarFallo,
+  respuestaLimite,
+} from "@/modulos/autenticacion/servicios/limites";
 
 // POST /api/auth/registro — Autoregistro de cuenta (solo si está habilitado en Ajustes)
+// Por defecto DESHABILITADO en instalaciones nuevas; el administrador lo
+// habilita desde Ajustes. Límite: 5 registros por IP cada hora.
 export async function POST(request: Request) {
   try {
     const banderas = await obtenerBanderasAuth();
     if (!banderas.registroHabilitado) {
       return NextResponse.json({ error: "REGISTRO_DESHABILITADO" }, { status: 403 });
+    }
+
+    const clave = `reg:${ipPeticion(request)}`;
+    if (estaBloqueada(clave)) {
+      return respuestaLimite(msRestantes(clave));
     }
 
     const cuerpo = await request.json();
@@ -34,6 +49,8 @@ export async function POST(request: Request) {
 
     const existente = await db.usuario.findUnique({ where: { correo } });
     if (existente) {
+      // Se cuenta como intento para saturar la IP (sondeo de correos).
+      registrarFallo(clave, POLITICAS.registro);
       return NextResponse.json({ error: "CORREO_EN_USO" }, { status: 409 });
     }
 
@@ -48,6 +65,7 @@ export async function POST(request: Request) {
       },
       include: { rol: true },
     });
+    registrarFallo(clave, POLITICAS.registro); // cuenta también los exitosos
 
     const token = await crearTokenSesion(usuario.id);
     return conCookieSesion(

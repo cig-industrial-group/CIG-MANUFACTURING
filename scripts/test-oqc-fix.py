@@ -14,13 +14,14 @@ manual de Almacén, y rechazo de SCRAP manual (regresión).
 Requisito: servidor standalone corriendo en el puerto 3300.
 """
 import json
+import os
 import sqlite3
 import urllib.error
 import urllib.request
 from datetime import datetime
 
 BASE = "http://127.0.0.1:3300"
-DB = "/home/z/my-project/db/custom.db"
+DB = os.environ.get("CIG_DB", "/home/z/my-project/db/custom.db")
 FECHA = datetime.now().strftime("%Y%m%d")
 
 cookie = None
@@ -107,7 +108,8 @@ def stock(producto_id, almacen_id):
 # FASE 1 — Sesión y datos base
 # ============================================================
 print("\n== FASE 1: sesión y datos base ==")
-sc, _ = req("POST", "/api/auth/login", {"correo": "admin@cig-manufacturing.com", "password": "Admin*2024"})
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD") or exit("✖ Define ADMIN_PASSWORD (contraseña del admin sembrado) antes de ejecutar")
+sc, _ = req("POST", "/api/auth/login", {"correo": "admin@cig-manufacturing.com", "password": ADMIN_PASSWORD})
 check("login admin", sc == 200, f"status={sc}")
 
 cliente = cur.execute(

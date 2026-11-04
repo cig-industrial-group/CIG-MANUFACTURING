@@ -8,8 +8,23 @@ import {
   hashearPassword,
 } from "@/modulos/autenticacion/servicios/auth";
 import { obtenerBanderasAuth } from "@/modulos/autenticacion/servicios/configuracion";
+import {
+  POLITICAS,
+  estaBloqueada,
+  ipPeticion,
+  msRestantes,
+  registrarFallo,
+  respuestaLimite,
+} from "@/modulos/autenticacion/servicios/limites";
 
 // POST /api/auth/recuperacion/confirmar — Confirmar código y establecer nueva contraseña
+//
+// Medidas aplicadas:
+//  · Sin enumeración: correo inexistente → misma respuesta CODIGO_INVALIDO
+//    que un código erróneo (el señuelo jamás está en la BD).
+//  · Máximo 5 intentos de confirmación fallidos por (correo + IP) en
+//    15 minutos; con el 6.º intento se responde 429 (el código, de 6
+//    dígitos, no puede agotarse por fuerza bruta).
 export async function POST(request: Request) {
   try {
     const banderas = await obtenerBanderasAuth();
@@ -29,9 +44,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "PASSWORD_DEBIL" }, { status: 400 });
     }
 
+    const clave = `conf:${correo}:${ipPeticion(request)}`;
+    if (estaBloqueada(clave)) {
+      return respuestaLimite(msRestantes(clave));
+    }
+
     const usuario = await db.usuario.findUnique({ where: { correo } });
     if (!usuario || !usuario.activo) {
-      return NextResponse.json({ error: "CORREO_NO_EXISTE" }, { status: 404 });
+      // Sin enumeración: mismo error que un código inválido.
+      registrarFallo(clave, POLITICAS.confirmacion);
+      return NextResponse.json({ error: "CODIGO_INVALIDO" }, { status: 400 });
     }
 
     const hash = createHash("sha256").update(codigo).digest("hex");
@@ -41,6 +63,7 @@ export async function POST(request: Request) {
     });
 
     if (!registro) {
+      registrarFallo(clave, POLITICAS.confirmacion);
       return NextResponse.json({ error: "CODIGO_INVALIDO" }, { status: 400 });
     }
     if (registro.expiraEn < new Date()) {

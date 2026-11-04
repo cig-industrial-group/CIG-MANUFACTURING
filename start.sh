@@ -6,28 +6,40 @@
 #        PORT=8080 ./start.sh (otro puerto)
 #
 # Requiere haber ejecutado antes ./setup.sh
+#
+# El proceso se DETIENE con error si falta: .env, compilación,
+# DATABASE_URL o un AUTH_SECRET válido. Runtime preferido: bun
+# (mismo que compila y prueba la CI); fallback: node.
 # ============================================================
 set -euo pipefail
 cd "$(dirname "$0")"
 
+ROJO='\033[0;31m'; SIN='\033[0m'
+fallo(){ echo -e "${ROJO}✖ $1${SIN}" >&2; exit 1; }
+
 if [ ! -f .env ]; then
-  echo "✖ No existe .env — ejecuta primero ./setup.sh (o copia .env.example a .env)"
-  exit 1
+  fallo "No existe .env — ejecuta primero ./setup.sh (o copia .env.example a .env)"
 fi
 if [ ! -d .next/standalone ]; then
-  echo "✖ Falta la compilación de producción — ejecuta ./setup.sh o npm run build"
-  exit 1
+  fallo "Falta la compilación de producción — ejecuta ./setup.sh o bun run build"
 fi
 
 # Cargar variables del .env (DATABASE_URL y AUTH_SECRET)
 set -a; source .env; set +a
 
+# Validador compartido (mismo criterio que la aplicación)
+# shellcheck source=scripts/validar-auth-secret.sh
+source scripts/validar-auth-secret.sh
+validar_auth_secret "${AUTH_SECRET:-}" \
+  || fallo "El servidor NO puede iniciar con un AUTH_SECRET inválido. Corrígelo en .env"
+
+[ -n "${DATABASE_URL:-}" ] || fallo "DATABASE_URL no está definida en .env"
+
 # Localizar server.js dentro del standalone (su ubicación puede variar según
 # la estructura del workspace donde se compiló)
 SERVER_JS="$(find .next/standalone -maxdepth 5 -name server.js -not -path "*node_modules*" | head -1)"
 if [ -z "$SERVER_JS" ]; then
-  echo "✖ No se encontró server.js dentro de .next/standalone — ejecuta ./setup.sh o npm run build"
-  exit 1
+  fallo "No se encontró server.js dentro de .next/standalone — ejecuta ./setup.sh o bun run build"
 fi
 
 # El servidor standalone de Next.js usa la variable HOSTNAME como dirección
@@ -39,5 +51,18 @@ export HOSTNAME="${BIND_HOST:-0.0.0.0}"
 export PORT="${PORT:-3000}"
 export NODE_ENV=production
 
-echo "▶ CIG-MANUFACTURING escuchando en http://$HOSTNAME:$PORT"
-exec node "$SERVER_JS"
+# Aviso si se desactiva la cookie Secure (solo LAN sin TLS)
+if [ "${COOKIE_INSEGURA_HTTP:-}" = "1" ]; then
+  echo "⚠ COOKIE_INSEGURA_HTTP=1: la cookie de sesión viajará por HTTP claro (solo redes internas de confianza)."
+fi
+
+# Runtime: preferir bun (el de la CI); si no existe, node
+if command -v bun >/dev/null 2>&1; then
+  echo "▶ CIG-MANUFACTURING escuchando en http://$HOSTNAME:$PORT (runtime: bun)"
+  exec bun "$SERVER_JS"
+else
+  command -v node >/dev/null 2>&1 \
+    || fallo "No se encontró bun ni node — instala Bun (recomendado) o Node.js"
+  echo "▶ CIG-MANUFACTURING escuchando en http://$HOSTNAME:$PORT (runtime: node)"
+  exec node "$SERVER_JS"
+fi

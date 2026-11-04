@@ -20,12 +20,13 @@ Reglas verificadas (v1.0.0, opción robusta):
 Requisito: servidor standalone corriendo en el puerto 3300.
 """
 import json
+import os
 import sqlite3
 import urllib.error
 import urllib.request
 
 BASE = "http://127.0.0.1:3300"
-DB = "/home/z/my-project/db/custom.db"
+DB = os.environ.get("CIG_DB", "/home/z/my-project/db/custom.db")
 
 cookie = None
 
@@ -88,7 +89,8 @@ def mov_db(mov_id):
 # FASE 1 — Sesión y datos base
 # ============================================================
 print("\n== FASE 1: sesión y datos base ==")
-sc, _ = req("POST", "/api/auth/login", {"correo": "admin@cig-manufacturing.com", "password": "Admin*2024"})
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD") or exit("✖ Define ADMIN_PASSWORD (contraseña del admin sembrado) antes de ejecutar")
+sc, _ = req("POST", "/api/auth/login", {"correo": "admin@cig-manufacturing.com", "password": ADMIN_PASSWORD})
 check("login admin", sc == 200, f"status={sc}")
 
 cliente = cur.execute("SELECT id, nombre FROM Cliente ORDER BY nombre LIMIT 1").fetchone()

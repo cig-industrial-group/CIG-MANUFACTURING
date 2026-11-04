@@ -24,13 +24,14 @@ Modelo verificado:
 Requisito: servidor corriendo en el puerto 3300.
 """
 import json
+import os
 import sqlite3
 import time
 import urllib.error
 import urllib.request
 
 BASE = "http://127.0.0.1:3300"
-DB = "/home/z/my-project/db/custom.db"
+DB = os.environ.get("CIG_DB", "/home/z/my-project/db/custom.db")
 
 cookie = None
 
@@ -88,7 +89,8 @@ print("E2E UNIDADES DE MEDIDA (factor por producto) — CIG-MANUFACTURING v1.0.0
 print("=" * 64)
 
 # ===== Sesión =====
-sc, _ = req("POST", "/api/auth/login", {"correo": "admin@cig-manufacturing.com", "password": "Admin*2024"})
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD") or exit("✖ Define ADMIN_PASSWORD (contraseña del admin sembrado) antes de ejecutar")
+sc, _ = req("POST", "/api/auth/login", {"correo": "admin@cig-manufacturing.com", "password": ADMIN_PASSWORD})
 check("login admin", sc == 200, sc)
 
 # ===== 1. Catálogo sembrado =====
