@@ -1,11 +1,22 @@
 # ============================================================
 # CIG-MANUFACTURING — Orquestación con Docker
 #
+#   Genera el secreto ANTES de levantar (obligatorio):
+#     export AUTH_SECRET="$(openssl rand -hex 32)"
+#
 #   Primera vez:   docker compose up -d --build
 #   Ver logs:      docker compose logs -f
 #   Detener:       docker compose down
 #   Respaldo BD:   docker compose exec cig-manufacturing sqlite3 /data/cig-manufacturing.db ".backup '/tmp/respaldo.db'"
 #                  (luego: docker compose cp cig-manufacturing:/tmp/respaldo.db ./respaldo.db)
+#
+# AUTH_SECRET es OBLIGATORIO: si no está definido en el entorno,
+# compose se niega a levantar el servicio (no hay valor por defecto).
+#
+# ADMIN_PASSWORD (opcional): solo se usa en la PRIMERA instalación
+# (base de datos sin usuarios) para fijar la contraseña del administrador.
+# Si no se define, se genera una aleatoria y queda en
+# /data/credenciales-iniciales.txt (permisos 600) dentro del volumen.
 # ============================================================
 services:
   cig-manufacturing:
@@ -13,14 +24,24 @@ services:
     container_name: cig-manufacturing
     restart: unless-stopped
     ports:
-      - "3000:3000"          # puerto:host  → cambia el de la izquierda si el 3000 está ocupado
+      - "3000:3000"          # app:puerto host → cambia el de la izquierda si el 3000 está ocupado
     environment:
-      # ⚠️ Genera tu propia clave:  openssl rand -hex 32
-      AUTH_SECRET: ${AUTH_SECRET:-cambia-esta-clave-con-openssl-rand-hex-32}
+      # ⚠ Obligatorio. Sin fallback: compose falla si falta.
+      #    Genera tu clave:  openssl rand -hex 32
+      AUTH_SECRET: "${AUTH_SECRET:?AUTH_SECRET no definido — generalo con: openssl rand -hex 32}"
       DATABASE_URL: file:/data/cig-manufacturing.db
       NODE_ENV: production
+      # Contraseña del ADMIN inicial (opcional, solo primera instalación):
+      # ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      # Solo para despliegues LAN sin TLS (la cookie viajará por HTTP claro):
+      # COOKIE_INSEGURA_HTTP: "1"
     volumes:
       - cig-manufacturing-data:/data
+    # Endurecimiento: sin capacidades Linux ni escalada de privilegios
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   cig-manufacturing-data:

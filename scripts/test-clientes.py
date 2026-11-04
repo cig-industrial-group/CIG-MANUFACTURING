@@ -30,7 +30,9 @@ import urllib.request
 from collections import Counter
 
 BASE = "http://127.0.0.1:3300"
-PROYECTO = "/home/z/my-project"
+PROYECTO = os.environ.get("CIG_PROYECTO", "/home/z/my-project")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD") or sys.exit(
+    "✖ Define ADMIN_PASSWORD (contraseña del admin sembrado) antes de ejecutar")
 
 PRUEBAS = []
 
@@ -82,7 +84,9 @@ def esperar_servidor(segundos=90):
 def main():
     # ===== Arranque del servidor (standalone, puerto 3300) =====
     env = dict(os.environ)
-    env.update({"PORT": "3300", "HOSTNAME": "0.0.0.0"})
+    # Servidor de pruebas por HTTP plano: permitir cookie sin Secure
+    # (equivale a un despliegue LAN sin TLS; ver DESPLIEGUE.md)
+    env.update({"PORT": "3300", "HOSTNAME": "0.0.0.0", "COOKIE_INSEGURA_HTTP": "1"})
     log = open("/tmp/cig-manufacturing-test-clientes.log", "w")
     proc = subprocess.Popen(
         ["bash", "start.sh"], cwd=PROYECTO, env=env,
@@ -107,7 +111,7 @@ def pruebas():
 
     print("\n=== 0. Limpieza de restos de ejecuciones previas ===")
     cod, _ = admin.req("POST", "/api/auth/login",
-                       {"correo": "admin@cig-manufacturing.com", "password": "Admin*2024"})
+                       {"correo": "admin@cig-manufacturing.com", "password": ADMIN_PASSWORD})
     check("Login admin", 200, cod)
     cod, lista = admin.req("GET", "/api/clientes?incluirInactivos=true")
     for c in lista:

@@ -5,15 +5,19 @@
 #   1. Guardia  → typescript.ignoreBuildErrors (y eslint.ignoreDuringBuilds)
 #                 deben estar DESACTIVADOS: las verificaciones del build
 #                 tienen que ser reales.
-#   2. Esquema  → prisma validate + prisma generate.
-#   3. Lint     → ESLint sobre todo el proyecto.
-#   4. Build    → next build con verificación de tipos activa.
-#   5. Tipos    → tsc --noEmit (reporta TODOS los errores, no solo el
+#   2. Guardia  → sin secretos inseguros: el código no puede contener
+#                 fallbacks de AUTH_SECRET ni valores publicados.
+#   3. Esquema  → prisma validate + prisma generate.
+#   4. Lint     → ESLint sobre todo el proyecto.
+#   5. Build    → next build con verificación de tipos activa.
+#   6. Tipos    → tsc --noEmit (reporta TODOS los errores, no solo el
 #                 primero como hace next build).
-#   6. Humo     → BD SQLite efímera + semilla + servidor standalone real:
-#                 GET /api, login admin y sesión con cookie firmada.
+#   7. Humo     → BD SQLite efímera + semilla + servidor standalone real:
+#                 GET /api, login admin, sesión con cookie firmada y
+#                 límite de intentos de login (429).
 #
-# Versión de Bun fijada a la usada en desarrollo (reproducibilidad).
+# Versión de Bun fijada a la usada en desarrollo y en la imagen Docker
+# (reproducibilidad: mismo runtime en build, pruebas y ejecución).
 # ============================================================
 name: CI
 
@@ -34,8 +38,11 @@ permissions:
 
 env:
   NEXT_TELEMETRY_DISABLED: "1"
-  # Secreto efímero exclusivo de pruebas (NO es de producción)
-  AUTH_SECRET: ci-clave-efimera-solo-pruebas
+  # Secreto EFÍMERO exclusivo de pruebas (64 hex; no es de producción
+  # y jamás firma nada fuera de los runners de CI).
+  AUTH_SECRET: "a9f3c1d85e7b24608f4a2c9e6b1d73580e4c2f9a5b8d3e127c6a0f4b9e2d85c31"
+  # Contraseña del administrador que siembra la BD efímera de pruebas
+  ADMIN_PASSWORD: "CiPruebas*2026"
   PORT: "3100"
   HOSTNAME: "127.0.0.1"
 
@@ -55,8 +62,6 @@ jobs:
           bun-version: 1.3.14
 
       - name: "Caché de dependencias de Bun"
-        # v6: runtime Node.js 24 (v4 corría sobre Node 20 → advertencia
-        # de deprecación en cada ejecución)
         uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
@@ -66,7 +71,7 @@ jobs:
       - name: "Instalar dependencias (lockfile congelado)"
         run: bun install --frozen-lockfile
 
-      # ── 1. GUARDIA ─────────────────────────────────────────────
+      # ── 1. GUARDIA DE CONFIGURACIÓN ────────────────────────────
       # Evita que alguien vuelva a ocultar errores del compilador.
       - name: "Guardia: ignoreBuildErrors debe estar desactivado"
         run: |
@@ -80,7 +85,42 @@ jobs:
           fi
           echo "OK: ignoreBuildErrors e ignoreDuringBuilds no están habilitados"
 
-      # ── 2. ESQUEMA ─────────────────────────────────────────────
+      # ── 2. GUARDIA DE SECRETOS ─────────────────────────────────
+      # Evita que un fallback de secreto conocido vuelva al código.
+      # La lista negra de valores prohibidos vive POR DISEÑO en
+      # seguridad.ts y validar-auth-secret.sh (para RECHAZARLOS);
+      # se excluyen de la búsqueda de presencia.
+      - name: "Guardia: sin secretos inseguros en el código"
+        run: |
+          PROBLEMA=0
+          # 1) Fallback con literal: AUTH_SECRET ?? "..." / || "..."
+          if grep -rn --include='*.ts' --include='*.tsx' -E 'AUTH_SECRET[[:space:]]*(\?\?|\|\|)[[:space:]]*["'"'"']' src/; then
+            echo "::error title=fallback AUTH_SECRET::Fallback de AUTH_SECRET con literal en src/. El secreto debe ser obligatorio."
+            PROBLEMA=1
+          fi
+          # 2) Fallback en orquestación
+          if grep -n 'AUTH_SECRET.*:-' docker-compose.yml Dockerfile; then
+            echo "::error title=fallback AUTH_SECRET::docker-compose.yml / Dockerfile definen un fallback de AUTH_SECRET."
+            PROBLEMA=1
+          fi
+          # 3) Credenciales fijas publicadas
+          if grep -rn --exclude='simulacion-ci.sh' --exclude='ci.yml' \
+            --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=db \
+            -e 'Admin\*2024' -e 'Ti\*2024' . ; then
+            echo "::error title=credencial publicada::Queda una credencial fija publicada en el repositorio (patrones Admin/Ti del 2024)."
+            PROBLEMA=1
+          fi
+          # 4) Secretos de desarrollo históricos usados como valor
+          #    (fuera de la lista negra declarada)
+          if grep -rn --exclude='seguridad.ts' --exclude='validar-auth-secret.sh' --exclude='simulacion-ci.sh' --exclude='ci.yml' \
+            --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=db --exclude-dir=.git \
+            -e 'cig-manufacturing-secreto-desarrollo' -e 'fabriflow-secreto-desarrollo' . ; then
+            echo "::error title=secreto inseguro::Un secreto de desarrollo histórico se usa como valor (ver arriba)."
+            PROBLEMA=1
+          fi
+          [ "$PROBLEMA" = "0" ] && echo "OK: sin fallbacks de secretos ni credenciales publicadas"
+
+      # ── 3. ESQUEMA ─────────────────────────────────────────────
       - name: "Definir base de datos efímera de pruebas"
         run: echo "DATABASE_URL=file:${RUNNER_TEMP}/cig-ci.db" >> "$GITHUB_ENV"
 
@@ -89,28 +129,28 @@ jobs:
           bunx prisma validate
           bunx prisma generate
 
-      # ── 3. LINT ────────────────────────────────────────────────
+      # ── 4. LINT ────────────────────────────────────────────────
       - name: "Lint (ESLint)"
         run: bun run lint
 
-      # ── 4. BUILD (tipos verificados de verdad) ─────────────────
+      # ── 5. BUILD (tipos verificados de verdad) ─────────────────
       - name: "Build de producción"
         run: bun run build
 
-      # ── 5. TYPECHECK COMPLETO ──────────────────────────────────
+      # ── 6. TYPECHECK COMPLETO ──────────────────────────────────
       # next build se detiene en el primer error; tsc los lista todos.
       - name: "Typecheck completo (tsc --noEmit)"
         run: ./node_modules/.bin/tsc --noEmit
 
-      # ── 6. HUMO (servidor real con BD real) ────────────────────
+      # ── 7. HUMO (servidor real con BD real) ────────────────────
       - name: "Humo: crear esquema y sembrar datos"
         run: |
           bunx prisma db push --skip-generate
-          bun prisma/seed.ts
+          ADMIN_PASSWORD="$ADMIN_PASSWORD" bun prisma/seed.ts
 
-      - name: "Humo: servidor standalone + API + login + sesión"
+      - name: "Humo: servidor standalone + API + login + sesión + rate-limit"
         run: |
-          NODE_ENV=production node .next/standalone/server.js > server-ci.log 2>&1 &
+          NODE_ENV=production bun .next/standalone/server.js > server-ci.log 2>&1 &
           PID=$!
           trap 'kill $PID 2>/dev/null || true' EXIT
 
@@ -132,10 +172,10 @@ jobs:
           echo "$CUERPO" | grep -q 'Hello, world!' \
             || { echo "::error::GET /api no devolvió el cuerpo esperado"; exit 1; }
 
-          # b) Login real contra la BD sembrada
+          # b) Login real contra la BD sembrada (contraseña de pruebas por entorno)
           LOGIN=$(curl -sf -c /tmp/cookies-ci.txt -X POST "http://127.0.0.1:3100/api/auth/login" \
             -H "Content-Type: application/json" \
-            -d '{"correo":"admin@cig-manufacturing.com","password":"Admin*2024"}')
+            -d "{\"correo\":\"admin@cig-manufacturing.com\",\"password\":\"$ADMIN_PASSWORD\"}")
           echo "POST /api/auth/login -> $(echo "$LOGIN" | head -c 200)"
           echo "$LOGIN" | grep -q '"usuario"' \
             || { echo "::error::El login no devolvió un usuario"; exit 1; }
@@ -146,7 +186,16 @@ jobs:
           echo "$SESION" | grep -q 'admin@cig-manufacturing.com' \
             || { echo "::error::La cookie de sesión no autentica"; exit 1; }
 
-          echo "Humo completo: arranque, API, login y sesión OK"
+          # d) El login bloquea la fuerza bruta (5 fallos → 429)
+          for i in 1 2 3 4 5 6 7; do
+            COD=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://127.0.0.1:3100/api/auth/login" \
+              -H "Content-Type: application/json" \
+              -d "{\"correo\":\"rate-limit@test.local\",\"password\":\"mala-$i\"}")
+          done
+          [ "$COD" = "429" ] \
+            || { echo "::error::El login no aplicó el límite de intentos (esperaba 429, obtuve $COD)"; exit 1; }
+
+          echo "Humo completo: arranque, API, login, sesión y rate-limit OK"
 
       - name: "Publicar log del servidor (solo si falló)"
         if: failure()

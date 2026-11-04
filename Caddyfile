@@ -1,23 +1,53 @@
-:81 {
-	@transform_port_query {
-		query XTransformPort=*
-	}
+# ============================================================
+# CIG-MANUFACTURING — Proxy inverso (Caddy)
+#
+# SEGURIDAD: este archivo tiene UN ÚNICO destino explícito: la
+# aplicación en localhost:3000. Ninguna cabecera, parámetro de
+# consulta ni parte de la petición del cliente puede alterar el
+# destino del proxy (la versión anterior permitía elegir el puerto
+# interno mediante ?XTransformPort=..., un SSRF que exponía
+# servicios internos; se eliminó por completo).
+#
+# Uso:
+#   · Con dominio público (HTTPS automático de Caddy):
+#       cambia "cig.example.com" por tu dominio.
+#   · Solo HTTP interno (red de fábrica sin TLS): descomenta el
+#     bloque ":81" y comenta el bloque del dominio. En ese caso
+#     define COOKIE_INSEGURA_HTTP=1 en la aplicación (documentado
+#     en DESPLIEGUE.md).
+# ============================================================
 
-	handle @transform_port_query {
-		reverse_proxy localhost:{query.XTransformPort} {
-			header_up Host {host}
-			header_up X-Forwarded-For {remote_host}
-			header_up X-Forwarded-Proto {scheme}
-			header_up X-Real-IP {remote_host}
-		}
-	}
+cig.example.com {
+	# Destino ÚNICO y fijo: la aplicación. Nunca se deriva de la petición.
+	reverse_proxy localhost:3000
 
-	handle {
-		reverse_proxy localhost:3000 {
-			header_up Host {host}
-			header_up X-Forwarded-For {remote_host}
-			header_up X-Forwarded-Proto {scheme}
-			header_up X-Real-IP {remote_host}
-		}
+	# Cabeceras de seguridad para la aplicación servida
+	header {
+		# Evita que el navegador "adivine" tipos de contenido
+		X-Content-Type-Options nosniff
+		# Evita incrustar la app en iframes de terceros (clickjacking)
+		X-Frame-Options DENY
+		# No enviar referrer a otros orígenes
+		Referrer-Policy strict-origin-when-cross-origin
+		# Sin caché de contenido autenticado por intermediarios
+		Cache-Control "no-store"
+		-Server
 	}
 }
+
+# ------------------------------------------------------------
+# Variante SOLO HTTP interno (sin TLS): descomenta para usarla y
+# comenta el bloque anterior. Puerto 81 en 127.0.0.1 (accesible
+# solo desde el propio host; usa el firewall para exponerlo en la
+# red interna si hace falta).
+# ------------------------------------------------------------
+# :81 {
+# 	reverse_proxy localhost:3000
+# 	header {
+# 		X-Content-Type-Options nosniff
+# 		X-Frame-Options DENY
+# 		Referrer-Policy strict-origin-when-cross-origin
+# 		Cache-Control "no-store"
+# 		-Server
+# 	}
+# }

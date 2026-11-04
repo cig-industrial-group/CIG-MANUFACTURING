@@ -35,12 +35,19 @@ usuarios, roles y permisos.
 
 ## Usuarios iniciales
 
-| Correo | Contraseña | Rol |
-|---|---|---|
-| `admin@cig-manufacturing.com` | `Admin*2024` | Administrador |
-| `ti@cig-manufacturing.com` | `Ti*2024` | TI |
+La instalación crea **una única cuenta administradora** (`admin@cig-manufacturing.com`)
+la primera vez que se siembra una base de datos vacía. Su contraseña **nunca está
+fijada en el repositorio**:
 
-> ⚠️ **Cambia estas contraseñas inmediatamente después del primer inicio de sesión.**
+- Si ejecutas la instalación con `ADMIN_PASSWORD='TuClave123' ./setup.sh`, esa es la
+  contraseña inicial del administrador.
+- Si no la defines, se genera una **aleatoria** y queda escrita (una sola vez,
+  permisos 600) en `db/credenciales-iniciales.txt`.
+
+> ⚠️ **Cambia la contraseña en el primer inicio de sesión** (el sistema te lo
+> pedirá) y elimina `credenciales-iniciales.txt` después. Las cuentas adicionales
+> (TI, almaceneros, operadores) se crean desde la aplicación una vez entras como
+> administrador.
 
 ## Pila tecnológica
 
@@ -84,9 +91,17 @@ cig-manufacturing/
 ## Inicio rápido
 
 ```bash
-./setup.sh     # configura .env, instala, crea BD, siembra usuarios y compila
+./setup.sh     # configura .env (AUTH_SECRET aleatorio), instala, crea BD, siembra y compila
 ./start.sh     # levanta el servidor en producción (puerto 3000)
 ```
+
+> Para fijar la contraseña del administrador inicial:
+> `ADMIN_PASSWORD='TuClave123' ./setup.sh` (solo tiene efecto la primera vez,
+> con la base de datos vacía).
+
+**Seguridad del arranque:** `AUTH_SECRET` es obligatorio en producción (mínimo
+32 caracteres, generado por `setup.sh`). Si falta o es inválido, la aplicación
+**no inicia**. Ver [`.env.example`](./.env.example).
 
 La guía completa (PM2, systemd, Nginx, Docker, respaldos, actualizaciones y solución de
 problemas) está en **[DESPLIEGUE.md](./DESPLIEGUE.md)**.
@@ -98,7 +113,18 @@ bun install        # o npm install
 bun run dev        # o npm run dev  → http://localhost:3000
 ```
 
+En desarrollo, si no defines `AUTH_SECRET`, se usa un secreto efímero aleatorio
+por proceso (las sesiones se pierden al reiniciar; nunca un valor conocido).
+
 Variables de entorno: ver [`.env.example`](./.env.example).
+
+### Pruebas
+
+```bash
+bash scripts/simulacion-ci.sh                     # réplica local del pipeline de CI
+ADMIN_PASSWORD='...' python3 scripts/test-clientes.py   # E2E del módulo Clientes
+# (los demás scripts de scripts/ aceptan igualmente ADMIN_PASSWORD)
+```
 
 ## Modelo de datos (resumen)
 

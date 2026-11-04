@@ -33,20 +33,19 @@ chmod +x setup.sh start.sh
 ./start.sh
 ```
 
-`setup.sh` hace todo: genera `.env` con una clave aleatoria, instala dependencias,
-crea la base de datos SQLite con su esquema, siembra **roles + usuarios + configuración**
-(sin datos de demostración) y compila para producción.
+`setup.sh` hace todo: genera `.env` con un secreto aleatorio, instala dependencias,
+crea la base de datos SQLite con su esquema, siembra **roles + configuración** y
+el **administrador inicial** (solo si la base está vacía), y compila para producción.
 
-Abre `http://TU_IP:3000` e inicia sesión:
+Abre `http://TU_IP:3000` e inicia sesión como `admin@cig-manufacturing.com`:
 
-| Correo | Contraseña |
-|---|---|
-| `admin@cig-manufacturing.com` | `Admin*2024` |
-| `ti@cig-manufacturing.com` | `Ti*2024` |
+- Si instalaste con `ADMIN_PASSWORD='TuClave123' ./setup.sh`, esa es tu contraseña.
+- Si no, `setup.sh` generó una **aleatoria** y la guardó en
+  `db/credenciales-iniciales.txt` (permisos 600): consúltala, entra y **cámbiala**
+  (el sistema te lo pedirá). Luego elimina ese archivo.
 
-> ⚠️ **El paquete ya incluye una base de datos limpia** (`db/custom.db`) con solo roles,
-> usuarios y configuración. `setup.sh` simplemente la verifica y re-siembra si hiciera
-> falta. Si prefieres empezar de cero: `rm db/custom.db` antes de ejecutar `setup.sh`.
+> 💡 Las cuentas adicionales (TI, jefes de almacén, operadores) se crean desde la
+> aplicación (Usuarios) una vez entras como administrador.
 
 ## 3. Instalación manual (paso a paso)
 
@@ -66,7 +65,11 @@ DATABASE_URL=file:/opt/cig-manufacturing/db/custom.db
 
 # Clave aleatoria para firmar sesiones (genera la tuya):
 #   openssl rand -hex 32
-AUTH_SECRET=pega-aqui-tu-clave-aleatoria
+# Mínimo 32 caracteres; sin ella la app NO inicia en producción.
+AUTH_SECRET=<pega-aqui-tu-clave-aleatoria>
+
+# Opcional: contraseña del admin inicial (solo primera instalación)
+# ADMIN_PASSWORD=Cambia*Esta123
 ```
 
 > ⚠️ **`DATABASE_URL` debe ser una ruta absoluta** (`file:/opt/cig-manufacturing/db/custom.db`).
@@ -78,15 +81,17 @@ AUTH_SECRET=pega-aqui-tu-clave-aleatoria
 bun install          # con Bun
 npm install          # con Node.js
 
-# 3. Crear la base de datos y sembrar usuarios
+# 3. Crear la base de datos y sembrar roles/config + admin inicial
 bunx prisma db push --skip-generate     # o: npx prisma db push --skip-generate
 bun prisma/seed.ts                      # o: npx tsx prisma/seed.ts
+# (usa ADMIN_PASSWORD para fijar la clave del admin; si no, genera una
+#  aleatoria en db/credenciales-iniciales.txt)
 
 # 4. Compilar para producción
 bun run build        # o: npm run build
 
 # 5. Arrancar
-./start.sh           # o directamente: node .next/standalone/server.js
+./start.sh           # o directamente: bun .next/standalone/server.js
 ```
 
 ## 4. Variables de entorno
@@ -94,9 +99,11 @@ bun run build        # o: npm run build
 | Variable | Obligatoria | Descripción |
 |---|---|---|
 | `DATABASE_URL` | ✅ | Ruta absoluta del SQLite: `file:/ruta/absoluta/db/custom.db` |
-| `AUTH_SECRET` | ✅ | Clave de firmado JWT. Si falta, se usa una insegura de desarrollo. |
+| `AUTH_SECRET` | ✅ | Clave de firmado JWT (mínimo 32 caracteres). **Si falta o es inválida, la aplicación NO inicia.** La genera `setup.sh`; en manual: `openssl rand -hex 32`. |
+| `ADMIN_PASSWORD` | ❌ | Contraseña del administrador inicial (solo primera instalación, BD vacía). Si no se define, se genera aleatoria en `db/credenciales-iniciales.txt`. |
 | `PORT` | ❌ | Puerto de escucha (por defecto `3000`). |
 | `BIND_HOST` | ❌ | Dirección de escucha (por defecto `0.0.0.0` = todas las interfaces; usa `127.0.0.1` para solo local). |
+| `COOKIE_INSEGURA_HTTP` | ❌ | `1` solo para despliegues LAN **sin TLS**: permite el inicio de sesión con cookie sin `Secure` (el arranque emite un aviso). Por defecto, en producción la cookie siempre es `Secure`. |
 
 ## 5. Mantener el servidor corriendo
 
@@ -148,11 +155,18 @@ sudo systemctl status cig-manufacturing
 ### Opción C — Docker
 
 ```bash
+# 1. Genera el secreto OBLIGATORIO (sin él, compose se niega a arrancar)
+export AUTH_SECRET="$(openssl rand -hex 32)"
+
+# 2. Levanta
+#    (opcional, primera instalación: -e ADMIN_PASSWORD… en el entorno)
 docker compose up -d --build
 ```
 
 Ver `docker-compose.yml`. La base de datos vive en un volumen (`cig-manufacturing-data`)
-y sobrevive a reinicios y reconstrucciones del contenedor.
+y sobrevive a reinicios y reconstrucciones del contenedor. El contenedor corre con
+**usuario sin privilegios**, sin capacidades Linux (`cap_drop: ALL`), con
+`no-new-privileges` y un `HEALTHCHECK` sobre `GET /api`.
 
 ## 6. Exponer el servicio (proxy inverso)
 
@@ -182,14 +196,23 @@ Con HTTPS (Let's Encrypt): `sudo certbot --nginx -d cig-manufacturing.tuempresa.
 
 ### Caddy (más simple, HTTPS automático)
 
+El repositorio incluye un `Caddyfile` de referencia con **destino único y fijo**
+(localhost:3000) y cabeceras de seguridad; sustituye `cig.example.com` por tu
+dominio:
+
 ```
 cig-manufacturing.tuempresa.com {
     reverse_proxy 127.0.0.1:3000
 }
 ```
 
-> Las cookies de sesión funcionan tanto por HTTP (red interna) como por HTTPS.
-> Para acceso desde Internet se recomienda HTTPS.
+> **Seguridad:** el destino del proxy es SIEMPRE fijo; ninguna parte de la
+> petición (cabeceras, query) puede modificarlo.
+>
+> **Cookies:** con HTTPS la cookie de sesión viaja protegida (el sistema la marca
+> `Secure` automáticamente en producción). Para despliegues **LAN sin TLS** por
+> HTTP plano, define `COOKIE_INSEGURA_HTTP=1` (el arranque avisará de que la
+> cookie viaja sin cifrar).
 
 ## 7. Respaldos
 
@@ -248,6 +271,8 @@ pm2 start cig-manufacturing  # o: sudo systemctl start cig-manufacturing
 | `PrismaClientInitializationError: Unable to open DB file` | `DATABASE_URL` relativa o sin permisos | Usa una **ruta absoluta** en `.env` y verifica permisos de escritura sobre `db/`. |
 | El servidor arranca pero no es accesible desde otras máquinas | Escucha solo en localhost o el firewall bloquea | `start.sh` ya fuerza la escucha en `0.0.0.0` (para solo local: `BIND_HOST=127.0.0.1 ./start.sh`). Abre el puerto en el firewall (`sudo ufw allow 3000`). |
 | Sesiones se pierden al reiniciar | `AUTH_SECRET` cambia entre arranques | Define `AUTH_SECRET` fija en `.env` (la genera `setup.sh` una sola vez). |
+| La app no arranca: «AUTH_SECRET no está definido / demasiado corto / coincide con un valor publicado» | Falta el secreto o es inválido | Genera uno con `openssl rand -hex 32` y ponlo en `.env` (o en el entorno del servicio). Es una condición intencional: producción jamás arranca con un secreto débil o conocido. |
+| Tras actualizar desde una instalación anterior, el contenedor no puede escribir en el volumen | El volumen fue creado por una versión antigua que corría como root | `docker run --rm -v cig-manufacturing-data:/data alpine chown -R 1000:1000 /data` |
 | Errores de `prisma generate` tras `npm install` | Instalación interrumpida | Ejecuta `npx prisma generate` manualmente y reintenta el build. |
 | Error descargando fuentes de Google durante `npm run build` | Sin salida a Internet en el servidor | Compila en otra máquina con Internet y copia el proyecto completo (incluido `.next/`), o edita `src/app/layout.tsx` quitando `Geist`/`Geist_Mono` de `next/font/google`. |
 | `EADDRINUSE: port 3000 in use` | Otro proceso usa el puerto | `PORT=8080 ./start.sh` o libera el puerto. |
@@ -255,10 +280,10 @@ pm2 start cig-manufacturing  # o: sudo systemctl start cig-manufacturing
 
 ## 10. Seguridad en producción (checklist)
 
-- [ ] Cambiar las contraseñas de `admin@cig-manufacturing.com` y `ti@cig-manufacturing.com`
-- [ ] `AUTH_SECRET` aleatorio y único (lo genera `setup.sh`)
-- [ ] Deshabilitar el autoregistro si no lo necesitas (Sistema → Ajustes)
-- [ ] HTTPS si hay acceso desde Internet
+- [ ] `AUTH_SECRET` aleatorio y único (lo genera `setup.sh`; obligatorio, validado al arranque)
+- [ ] Cambiar la contraseña del administrador inicial en el primer acceso (el sistema la exige) y borrar `db/credenciales-iniciales.txt` si existe
+- [ ] Crear usuarios reales por persona y desactivar cuentas genéricas cuando ya no se usen
+- [ ] Autoregistro y recuperación por código DESHABILITADOS por defecto: habilítalos solo si los necesitas (Sistema → Ajustes)
+- [ ] HTTPS si hay acceso desde Internet (con Caddy/Nginx + Let's Encrypt); en LAN sin TLS, valorar `COOKIE_INSEGURA_HTTP=1`
 - [ ] Respaldo diario programado de `db/custom.db`
 - [ ] Firewall: exponer solo 80/443 (y SSH), no el 3000 directamente
-- [ ] Crear usuarios reales por persona y desactivar cuentas genéricas cuando ya no se usen

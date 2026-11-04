@@ -30,3 +30,7 @@ npm-debug.log*
 # Editor
 .idea
 .vscode
+
+# Caché de Python (scripts de prueba)
+__pycache__/
+*.pyc

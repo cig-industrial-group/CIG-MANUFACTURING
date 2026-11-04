@@ -8,13 +8,21 @@ import bcrypt from "bcryptjs";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import type { UsuarioSesion } from "../tipos";
+import { obtenerSecretoFirmado, esProduccion } from "./seguridad";
 
 export const COOKIE_SESION = "cig_manufacturing_sesion";
 const DURACION_SESION_SEG = 60 * 60 * 24 * 7; // 7 días
 
-const secreto = new TextEncoder().encode(
-  process.env.AUTH_SECRET ?? "cig-manufacturing-secreto-desarrollo-2024-cambiar-en-produccion",
-);
+// El secreto se resuelve y valida de forma PEREZOSA (al primer uso) y se
+// memoriza. La validación de arranque vive en src/instrumentation.ts; esta
+// es la defensa en profundidad: cualquier operación de firma/verificación
+// exige un secreto válido (en producción, un AUTH_SECRET ausente/inválido/
+// conocido lanza y la operación no continúa).
+let secretoCache: Uint8Array | null = null;
+function secretoFirmado(): Uint8Array {
+  secretoCache ??= obtenerSecretoFirmado();
+  return secretoCache;
+}
 
 // ===== Contraseñas =====
 
@@ -56,12 +64,12 @@ export async function crearTokenSesion(usuarioId: string): Promise<string> {
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${DURACION_SESION_SEG}s`)
-    .sign(secreto);
+    .sign(secretoFirmado());
 }
 
 export async function verificarTokenSesion(token: string): Promise<string | null> {
   try {
-    const { payload } = await jwtVerify(token, secreto);
+    const { payload } = await jwtVerify(token, secretoFirmado());
     return typeof payload.sub === "string" ? payload.sub : null;
   } catch {
     return null;
@@ -144,11 +152,31 @@ export async function requerirPermiso(
   return { usuario };
 }
 
+/**
+ * ¿La cookie debe marcarse como Secure? En producción SÍ (obligatorio por
+ * defecto: la sesión no debe viajar por HTTP claro). Existe una opción
+ * explícita y documentada para despliegues LAN sin TLS:
+ *   COOKIE_INSEGURA_HTTP=1
+ * El arranque avisa por consola cuando se usa (nunca es silenciosa).
+ */
+function cookieSegura(): boolean {
+  if (!esProduccion()) return false;
+  if (process.env.COOKIE_INSEGURA_HTTP === "1") {
+    console.warn(
+      "[seguridad] COOKIE_INSEGURA_HTTP=1: la cookie de sesión se enviará también por HTTP claro " +
+        "(solo para redes internas de confianza sin TLS). Retírala cuando el proxy sirva HTTPS.",
+    );
+    return false;
+  }
+  return true;
+}
+
 /** Adjunta la cookie de sesión a una respuesta JSON */
 export function conCookieSesion(respuesta: NextResponse, token: string): NextResponse {
   respuesta.cookies.set(COOKIE_SESION, token, {
     httpOnly: true,
     sameSite: "lax",
+    secure: cookieSegura(),
     path: "/",
     maxAge: DURACION_SESION_SEG,
   });
@@ -157,7 +185,12 @@ export function conCookieSesion(respuesta: NextResponse, token: string): NextRes
 
 /** Elimina la cookie de sesión */
 export function sinCookieSesion(respuesta: NextResponse): NextResponse {
-  respuesta.cookies.set(COOKIE_SESION, "", { httpOnly: true, path: "/", maxAge: 0 });
+  respuesta.cookies.set(COOKIE_SESION, "", {
+    httpOnly: true,
+    secure: cookieSegura(),
+    path: "/",
+    maxAge: 0,
+  });
   return respuesta;
 }
 

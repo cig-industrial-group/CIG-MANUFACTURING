@@ -32,8 +32,8 @@ import urllib.parse
 import urllib.request
 
 BASE = "http://127.0.0.1:3300"
-DB = "/home/z/my-project/db/custom.db"
-CARPETA = "/home/z/my-project/db/backups"
+DB = os.environ.get("CIG_DB", "/home/z/my-project/db/custom.db")
+CARPETA = os.path.join(os.path.dirname(DB), "backups")
 VENTANA_SEG = 24 * 3600
 
 cookie = None
@@ -112,7 +112,8 @@ def sql_directo(sentencias):
 
 
 print("════════ 1. SESIÓN Y ESTADO INICIAL ════════")
-sc, _ = req("POST", "/api/auth/login", {"correo": "admin@cig-manufacturing.com", "password": "Admin*2024"})
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD") or exit("✖ Define ADMIN_PASSWORD (contraseña del admin sembrado) antes de ejecutar")
+sc, _ = req("POST", "/api/auth/login", {"correo": "admin@cig-manufacturing.com", "password": ADMIN_PASSWORD})
 check("login admin", sc == 200, f"status={sc}")
 
 sc, estado = req("GET", "/api/respaldo")
@@ -373,7 +374,7 @@ if objetivo:
     check("la mutación se registró", con_mutacion.get("Cliente", 0) == antes_subida.get("Cliente", 0) + 1, f"clientes={con_mutacion.get('Cliente')}")
 
     # Conteos esperados según el ARCHIVO subido (verificación independiente)
-    ruta_tmp = "/home/z/my-project/scripts/tmp-e2e-subida.db"
+    ruta_tmp = os.path.join(os.path.dirname(DB), "tmp-e2e-subida.db")
     with open(ruta_tmp, "wb") as fh:
         fh.write(bytes_respaldo)
     con = sqlite3.connect(ruta_tmp)

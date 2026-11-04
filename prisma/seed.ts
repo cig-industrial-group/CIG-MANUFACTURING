@@ -1,12 +1,49 @@
 /**
- * SEMILLA DEL SISTEMA — Roles, usuarios iniciales y configuración.
- * Idempotente: puede ejecutarse varias veces sin duplicar datos.
- * Uso: bun prisma/seed.ts
+ * SEMILLA DEL SISTEMA — Roles, configuración y administrador inicial.
+ *
+ * Diseño de seguridad (auditoría C-6):
+ *  · Roles y configuración: idempotentes (upsert sin sobrescribir
+ *    valores gestionados desde la aplicación). Puede ejecutarse
+ *    siempre sin efectos secundarios.
+ *  · Usuarios: SOLO se crean en una base de datos SIN usuarios
+ *    (primera instalación). Nunca se recrean cuentas eliminadas y
+ *    jamás existen contraseñas fijas publicadas:
+ *      - ADMIN_PASSWORD del entorno → se valida contra la política
+ *        del sistema y se usa como contraseña del administrador.
+ *      - Sin ADMIN_PASSWORD → contraseña ALEATORIA (144 bits) que se
+ *        escribe UNA VEZ en credenciales-iniciales.txt (permisos 0600,
+ *        junto a la base de datos) y obliga a cambiarla en el primer
+ *        acceso (debeCambiarPassword=true).
+ *    La contraseña NUNCA se imprime por consola.
+ *
+ * Uso: bun prisma/seed.ts   (ADMIN_PASSWORD=... para fijarla)
  */
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { randomBytes } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 
 const db = new PrismaClient();
+
+/** Mismo criterio que cumplePoliticaPassword() del módulo de autenticación. */
+function cumplePolitica(password: string): boolean {
+  return (
+    password.length >= 8 && /[a-zA-ZáéíóúÁÉÍÓÚñÑ]/.test(password) && /[0-9]/.test(password)
+  );
+}
+
+/** Contraseña aleatoria fuerte (24 chars base64url ≈ 144 bits). */
+function passwordAleatoria(): string {
+  return randomBytes(18).toString("base64url");
+}
+
+/** Ruta del archivo de la BD a partir de DATABASE_URL (file:...). */
+function rutaBaseDatos(): string {
+  const url = process.env.DATABASE_URL ?? "";
+  const limpia = url.replace(/^file:/, "");
+  return path.isAbsolute(limpia) ? limpia : path.resolve(process.cwd(), limpia);
+}
 
 /** Catálogo de permisos del sistema */
 export const PERMISOS = [
@@ -91,22 +128,18 @@ const ROLES: Array<{
   },
 ];
 
-const USUARIOS: Array<{
-  nombre: string;
-  correo: string;
-  password: string;
-  rolClave: string;
-}> = [
-  { nombre: "Administrador del Sistema", correo: "admin@cig-manufacturing.com", password: "Admin*2024", rolClave: "ADMIN" },
-  { nombre: "Departamento de TI", correo: "ti@cig-manufacturing.com", password: "Ti*2024", rolClave: "TI" },
-];
+const CORREO_ADMIN = "admin@cig-manufacturing.com";
 
 const CONFIGURACION: Record<string, string> = {
-  // Registro público de usuarios (pantalla de acceso)
-  "auth.registroHabilitado": JSON.stringify(true),
-  // Recuperación automática de contraseña por código
-  "auth.recuperacionHabilitada": JSON.stringify(true),
-  // Rol asignado a las cuentas de autocregistro
+  // Registro público de usuarios: DESHABILITADO por defecto en
+  // instalaciones nuevas (auditoría M-1). El administrador puede
+  // habilitarlo desde el módulo Ajustes.
+  "auth.registroHabilitado": JSON.stringify(false),
+  // Recuperación automática por código: DESHABILITADA por defecto
+  // (auditoría M-2/C-4: el sistema no tiene SMTP y el código se
+  // entrega en la respuesta). Habilitar conscientemente en Ajustes.
+  "auth.recuperacionHabilitada": JSON.stringify(false),
+  // Rol asignado a las cuentas de autoregistro
   "auth.rolRegistro": JSON.stringify("OPERADOR"),
 };
 
@@ -133,27 +166,6 @@ async function main() {
   }
   console.log(`✔ ${ROLES.length} roles asegurados`);
 
-  // ===== Usuarios iniciales =====
-  for (const u of USUARIOS) {
-    const rol = await db.rol.findUnique({ where: { clave: u.rolClave } });
-    if (!rol) throw new Error(`Rol no encontrado: ${u.rolClave}`);
-    const existente = await db.usuario.findUnique({ where: { correo: u.correo } });
-    if (!existente) {
-      await db.usuario.create({
-        data: {
-          nombre: u.nombre,
-          correo: u.correo,
-          passwordHash: await bcrypt.hash(u.password, 10),
-          rolId: rol.id,
-          activo: true,
-        },
-      });
-      console.log(`✔ Usuario creado: ${u.correo}`);
-    } else {
-      console.log(`· Usuario ya existe: ${u.correo}`);
-    }
-  }
-
   // ===== Configuración =====
   for (const [clave, valor] of Object.entries(CONFIGURACION)) {
     await db.configuracion.upsert({
@@ -164,13 +176,69 @@ async function main() {
   }
   console.log("✔ Configuración asegurada");
 
+  // ===== Administrador inicial: SOLO en una base sin usuarios =====
+  const totalUsuarios = await db.usuario.count();
+  if (totalUsuarios > 0) {
+    console.log(`· Ya existen ${totalUsuarios} usuarios — no se crean cuentas (las existentes se conservan).`);
+  } else {
+    const rol = await db.rol.findUnique({ where: { clave: "ADMIN" } });
+    if (!rol) throw new Error("Rol no encontrado: ADMIN");
+
+    const passwordEntorno = process.env.ADMIN_PASSWORD;
+    let password: string;
+    let origen: "entorno" | "aleatoria";
+
+    if (passwordEntorno !== undefined && passwordEntorno !== "") {
+      if (!cumplePolitica(passwordEntorno)) {
+        throw new Error(
+          "ADMIN_PASSWORD no cumple la política (mínimo 8 caracteres, al menos una letra y un número).",
+        );
+      }
+      password = passwordEntorno;
+      origen = "entorno";
+    } else {
+      password = passwordAleatoria();
+      origen = "aleatoria";
+    }
+
+    await db.usuario.create({
+      data: {
+        nombre: "Administrador del Sistema",
+        correo: CORREO_ADMIN,
+        passwordHash: await bcrypt.hash(password, 10),
+        rolId: rol.id,
+        activo: true,
+        // Obligar a cambiar la contraseña en el primer acceso.
+        debeCambiarPassword: true,
+      },
+    });
+
+    if (origen === "entorno") {
+      console.log(`✔ Usuario administrador creado: ${CORREO_ADMIN} (contraseña: ADMIN_PASSWORD del entorno)`);
+    } else {
+      // Contraseña aleatoria: escribir UNA VEZ junto a la BD (permisos 600).
+      const archivo = path.join(path.dirname(rutaBaseDatos()), "credenciales-iniciales.txt");
+      const contenido =
+        `CIG-MANUFACTURING — Credenciales iniciales (primera instalación)\n` +
+        `Fecha: ${new Date().toISOString()}\n` +
+        `Usuario: ${CORREO_ADMIN}\n` +
+        `Contraseña: ${password}\n` +
+        `\nCAMBIA esta contraseña al iniciar sesión y ELIMINA este archivo.\n` +
+        `Este archivo solo se crea cuando la base de datos no tenía usuarios.\n`;
+      fs.writeFileSync(archivo, contenido, { mode: 0o600 });
+      console.log(`✔ Usuario administrador creado: ${CORREO_ADMIN}`);
+      console.log(`✔ Contraseña aleatoria generada y guardada (permisos 600) en: ${archivo}`);
+      console.log("  → Cámbiala en el primer inicio de sesión y borra el archivo.");
+    }
+  }
+
   const total = await db.usuario.count();
   console.log(`\nSemilla completada. Usuarios en el sistema: ${total}`);
 }
 
 main()
   .catch((e) => {
-    console.error("Error en la semilla:", e);
+    console.error("Error en la semilla:", e instanceof Error ? e.message : e);
     process.exit(1);
   })
   .finally(() => db.$disconnect());

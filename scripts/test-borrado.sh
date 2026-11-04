@@ -3,8 +3,14 @@
 # PRUEBAS E2E v1.0.0 — Borrado real + desactivar/reactivar
 # Ejecuta el servidor standalone y valida el comportamiento
 # de los endpoints contra la base de datos de desarrollo.
+#
+# Requiere ADMIN_PASSWORD (contraseña del admin sembrado):
+#   ADMIN_PASSWORD='...' bash scripts/test-borrado.sh
 # ============================================================
-cd /home/z/my-project || exit 1
+PROYECTO="${CIG_PROYECTO:-/home/z/my-project}"
+cd "$PROYECTO" || exit 1
+
+[ -n "${ADMIN_PASSWORD:-}" ] || { echo "✖ Define ADMIN_PASSWORD (contraseña del admin sembrado) antes de ejecutar"; exit 1; }
 
 PORT=3100
 BASE="http://127.0.0.1:$PORT"
@@ -24,9 +30,19 @@ fi
 if [ -z "$SRV" ]; then echo "No se encontró server.js"; exit 1; fi
 echo "Servidor: $SRV (puerto $PORT)"
 
+# AUTH_SECRET obligatorio: del entorno o del .env del proyecto
+if [ -z "${AUTH_SECRET:-}" ] && [ -f "$PROYECTO/.env" ]; then
+  AUTH_SECRET=$(grep '^AUTH_SECRET=' "$PROYECTO/.env" | head -1 | cut -d= -f2-)
+  export AUTH_SECRET
+fi
+[ -n "${AUTH_SECRET:-}" ] || { echo "✖ Falta AUTH_SECRET (defínelo en el entorno o en $PROYECTO/.env)"; exit 1; }
+
+RUNTIME=node
+command -v bun > /dev/null 2>&1 && RUNTIME=bun
 HOSTNAME=0.0.0.0 PORT=$PORT \
-DATABASE_URL="file:/home/z/my-project/db/custom.db" \
-NODE_ENV=production node "$SRV" > /tmp/ff-server.log 2>&1 &
+DATABASE_URL="file:$PROYECTO/db/custom.db" \
+COOKIE_INSEGURA_HTTP=1 \
+NODE_ENV=production $RUNTIME "$SRV" > /tmp/ff-server.log 2>&1 &
 SRV_PID=$!
 trap 'kill $SRV_PID 2>/dev/null' EXIT
 
@@ -47,7 +63,7 @@ COD=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/api/catalogo/modelos")
 
 COD=$(curl -s -c "$CJ" -o /tmp/ff-login.json -w "%{http_code}" -X POST "$BASE/api/auth/login" \
   -H "Content-Type: application/json" \
-  -d '{"correo":"admin@cig-manufacturing.com","password":"Admin*2024"}')
+  -d "{\"correo\":\"admin@cig-manufacturing.com\",\"password\":\"$ADMIN_PASSWORD\"}")
 [ "$COD" = "200" ] && ok "Login admin (200)" || { mal "Login admin ($COD)"; cat /tmp/ff-login.json; }
 ADMIN_ID=$(jv /tmp/ff-login.json "['usuario']['id']")
 
@@ -108,8 +124,8 @@ COD=$(curl -s -b "$CJ" -o /dev/null -w "%{http_code}" -X DELETE "$BASE/api/almac
 ESTA=$(curl -s -b "$CJ" "$BASE/api/almacen/productos?incluirInactivos=true" | python3 -c "import sys,json; print(any(p['sku']=='TST-PROD-LIBRE' for p in json.load(sys.stdin)))")
 [ "$ESTA" = "False" ] && ok "Producto borrado de la BD" || mal "El producto sigue existiendo"
 
-# ---------- Producto y almacén CON movimientos: borrado bloqueado ----------
-seccion "Registros con historial (bloqueo por integridad)"
+# ---------- Producto y almacén CON movimientos: ciclo papelera ----------
+seccion "Registros con historial (papelera + historia congelada)"
 COD=$(curl -s -b "$CJ" -o /tmp/ff-alm.json -w "%{http_code}" -X POST "$BASE/api/almacen/almacenes" \
   -H "Content-Type: application/json" -d '{"codigo":"TST-ALM","nombre":"Almacén temporal","tipo":"GENERAL"}')
 [ "$COD" = "201" ] && ok "Crear almacén temporal (201)" || { mal "Crear almacén ($COD)"; cat /tmp/ff-alm.json; }
@@ -126,34 +142,62 @@ COD=$(curl -s -b "$CJ" -o /tmp/ff-mov.json -w "%{http_code}" -X POST "$BASE/api/
 [ "$COD" = "201" ] && ok "Registrar ENTRADA de 5 (201)" || { mal "Registrar movimiento ($COD)"; cat /tmp/ff-mov.json; }
 MOVID=$(jv /tmp/ff-mov.json "['id']")
 
-COD=$(curl -s -b "$CJ" -o /tmp/ff-err.json -w "%{http_code}" -X DELETE "$BASE/api/almacen/productos/$PR2")
-ERR=$(jv /tmp/ff-err.json "['error']" 2>/dev/null)
-[ "$COD" = "409" ] && [ "$ERR" = "PRODUCTO_CON_MOVIMIENTOS" ] && ok "DELETE producto con movimientos → 409 PRODUCTO_CON_MOVIMIENTOS" || mal "Producto con movimientos → $COD $ERR"
-
-COD=$(curl -s -b "$CJ" -o /tmp/ff-err.json -w "%{http_code}" -X DELETE "$BASE/api/almacen/almacenes/$AID")
-ERR=$(jv /tmp/ff-err.json "['error']" 2>/dev/null)
-[ "$COD" = "409" ] && [ "$ERR" = "ALMACEN_CON_MOVIMIENTOS" ] && ok "DELETE almacén con movimientos → 409 ALMACEN_CON_MOVIMIENTOS" || mal "Almacén con movimientos → $COD $ERR"
-
-# Desactivar y verificar visibilidad
-COD=$(curl -s -b "$CJ" -o /dev/null -w "%{http_code}" -X PATCH "$BASE/api/almacen/productos/$PR2" \
-  -H "Content-Type: application/json" -d '{"activo":false}')
-[ "$COD" = "200" ] && ok "Desactivar producto con historial (PATCH)" || mal "Desactivar producto ($COD)"
-ESTA=$(curl -s -b "$CJ" "$BASE/api/almacen/productos" | python3 -c "import sys,json; print(any(p['sku']=='TST-PROD-BLOQ' for p in json.load(sys.stdin)))")
-[ "$ESTA" = "False" ] && ok "Producto desactivado oculto por defecto" || mal "Producto desactivado visible"
-COD=$(curl -s -b "$CJ" -o /dev/null -w "%{http_code}" -X PATCH "$BASE/api/almacen/productos/$PR2" \
-  -H "Content-Type: application/json" -d '{"activo":true}')
-[ "$COD" = "200" ] && ok "Reactivar producto" || mal "Reactivar producto ($COD)"
-
-# Eliminar el movimiento (bitácora) y entonces sí poder borrar el producto
+# Con las entidades vivas, el movimiento SÍ es corregible/eliminable (bitácora)
 COD=$(curl -s -b "$CJ" -o /tmp/ff-movdel.json -w "%{http_code}" -X DELETE "$BASE/api/almacen/movimientos/$MOVID" \
   -H "Content-Type: application/json" -d '{"motivoCorreccion":"Limpieza de datos de prueba E2E"}')
-[ "$COD" = "200" ] && ok "Eliminar movimiento con motivo (bitácora)" || { mal "Eliminar movimiento ($COD)"; cat /tmp/ff-movdel.json; }
+[ "$COD" = "200" ] && ok "Eliminar movimiento con entidades vivas (bitácora)" || { mal "Eliminar movimiento ($COD)"; cat /tmp/ff-movdel.json; }
 
-COD=$(curl -s -b "$CJ" -o /dev/null -w "%{http_code}" -X DELETE "$BASE/api/almacen/productos/$PR2")
-[ "$COD" = "200" ] && ok "Tras limpiar historial: producto eliminable" || mal "Producto aún bloqueado ($COD)"
+# Sin movimientos vivos, producto y almacén se eliminan (van a papelera)
+COD=$(curl -s -b "$CJ" -o /tmp/ff-del2.json -w "%{http_code}" -X DELETE "$BASE/api/almacen/productos/$PR2")
+[ "$COD" = "200" ] && ok "DELETE producto tras limpiar historial → 200 (papelera)" || { mal "Eliminar producto ($COD)"; cat /tmp/ff-del2.json; }
+COD=$(curl -s -b "$CJ" -o /tmp/ff-del3.json -w "%{http_code}" -X DELETE "$BASE/api/almacen/almacenes/$AID")
+[ "$COD" = "200" ] && ok "DELETE almacén tras limpiar historial → 200 (papelera)" || { mal "Eliminar almacén ($COD)"; cat /tmp/ff-del3.json; }
 
-COD=$(curl -s -b "$CJ" -o /dev/null -w "%{http_code}" -X DELETE "$BASE/api/almacen/almacenes/$AID")
-[ "$COD" = "200" ] && ok "Tras limpiar historial: almacén eliminable" || mal "Almacén aún bloqueado ($COD)"
+# ---- Ciclo papelera: movimiento congelado + restauración ----
+seccion "Papelera: historia congelada y restauración"
+COD=$(curl -s -b "$CJ" -o /tmp/ff-pr4.json -w "%{http_code}" -X POST "$BASE/api/almacen/productos" \
+  -H "Content-Type: application/json" -d '{"sku":"TST-PROD-PAPELERA","nombre":"Producto papelera","categoria":"MATERIAL","unidad":"PZA"}')
+PR4=$(jv /tmp/ff-pr4.json "['id']")
+# (almacén disponible: el primero activo del listado)
+AID_DISP=$(curl -s -b "$CJ" "$BASE/api/almacen/almacenes" | python3 -c "import sys,json; print(next(a['id'] for a in json.load(sys.stdin) if a['activo']))")
+COD=$(curl -s -b "$CJ" -o /tmp/ff-mov2.json -w "%{http_code}" -X POST "$BASE/api/almacen/movimientos" \
+  -H "Content-Type: application/json" \
+  -d "{\"tipo\":\"ENTRADA\",\"productoId\":\"$PR4\",\"almacenDestinoId\":\"$AID_DISP\",\"cantidad\":3}")
+[ "$COD" = "201" ] && ok "Entrada para producto de papelera (201)" || { mal "Entrada papelera ($COD)"; cat /tmp/ff-mov2.json; }
+MOVID2P=$(jv /tmp/ff-mov2.json "['id']")
+
+COD=$(curl -s -b "$CJ" -o /tmp/ff-delp4.json -w "%{http_code}" -X DELETE "$BASE/api/almacen/productos/$PR4")
+[ "$COD" = "200" ] && ok "DELETE producto con movimiento → 200 (papelera)" || { mal "Eliminar producto con historial ($COD)"; cat /tmp/ff-delp4.json; }
+
+COD=$(curl -s -b "$CJ" -o /tmp/ff-err.json -w "%{http_code}" -X DELETE "$BASE/api/almacen/movimientos/$MOVID2P" \
+  -H "Content-Type: application/json" -d '{"motivoCorreccion":"intento"}')
+ERR=$(jv /tmp/ff-err.json "['error']" 2>/dev/null)
+[ "$COD" = "409" ] && [ "$ERR" = "REGISTRO_HISTORICO" ] && ok "Movimiento de entidad en papelera CONGELADO → 409 REGISTRO_HISTORICO" || mal "Movimiento congelado → $COD $ERR"
+
+COD=$(curl -s -b "$CJ" -o /dev/null -w "%{http_code}" -X PATCH "$BASE/api/almacen/productos/$PR4" \
+  -H "Content-Type: application/json" -d '{"activo":false}')
+[ "$COD" = "404" ] && ok "PATCH producto en papelera → 404 (no está entre los vivos)" || mal "PATCH producto en papelera ($COD)"
+
+# Restaurar desde la papelera re-vincula el historial
+ENTRADA_PAPELERA=$(curl -s -b "$CJ" "$BASE/api/papelera" | python3 -c "import sys,json; d=json.load(sys.stdin); e=[p for p in d.get('entradas',[]) if p.get('entidadId')=='$PR4' and p.get('estado')=='EN_PAPELERA']; print(e[0]['id'] if e else '')")
+[ -n "$ENTRADA_PAPELERA" ] && ok "Entrada de papelera localizada" || mal "No se encontró la entrada de papelera"
+if [ -n "$ENTRADA_PAPELERA" ]; then
+  COD=$(curl -s -b "$CJ" -o /dev/null -w "%{http_code}" -X POST "$BASE/api/papelera/$ENTRADA_PAPELERA/restaurar")
+  [ "$COD" = "200" ] && ok "Restaurar producto desde papelera (200)" || mal "Restaurar ($COD)"
+fi
+
+COD=$(curl -s -b "$CJ" -o /dev/null -w "%{http_code}" -X PATCH "$BASE/api/almacen/productos/$PR4" \
+  -H "Content-Type: application/json" -d '{"activo":false}')
+[ "$COD" = "200" ] && ok "Desactivar producto restaurado (PATCH)" || mal "Desactivar producto restaurado ($COD)"
+COD=$(curl -s -b "$CJ" -o /dev/null -w "%{http_code}" -X PATCH "$BASE/api/almacen/productos/$PR4" \
+  -H "Content-Type: application/json" -d '{"activo":true}')
+[ "$COD" = "200" ] && ok "Reactivar producto restaurado" || mal "Reactivar producto ($COD)"
+
+COD=$(curl -s -b "$CJ" -o /dev/null -w "%{http_code}" -X DELETE "$BASE/api/almacen/movimientos/$MOVID2P" \
+  -H "Content-Type: application/json" -d '{"motivoCorreccion":"Limpieza E2E producto papelera"}')
+[ "$COD" = "200" ] && ok "Movimiento editable de nuevo tras restaurar (bitácora)" || mal "Eliminar movimiento restaurado ($COD)"
+
+curl -s -b "$CJ" -o /dev/null -X DELETE "$BASE/api/almacen/productos/$PR4"
 
 # ---------- Usuarios ----------
 seccion "Usuarios"
@@ -176,7 +220,7 @@ COD=$(curl -s -b "$CJ2" -o /tmp/ff-err.json -w "%{http_code}" -X POST "$BASE/api
 ERR=$(jv /tmp/ff-err.json "['error']" 2>/dev/null)
 [ "$COD" = "403" ] && [ "$ERR" = "SIN_PERMISO" ] && ok "Crear modelo sin permiso → 403 SIN_PERMISO" || mal "Permisos → $COD $ERR"
 
-# El usuario temporal registra un movimiento → no puede borrarse (integridad)
+# El usuario temporal registra un movimiento (referencia suave en el ledger)
 COD=$(curl -s -b "$CJ" -o /tmp/ff-pr3.json -w "%{http_code}" -X POST "$BASE/api/almacen/productos" \
   -H "Content-Type: application/json" -d '{"sku":"TST-PROD-U2","nombre":"Producto usuario temporal"}')
 PR3=$(jv /tmp/ff-pr3.json "['id']")
@@ -190,16 +234,26 @@ COD=$(curl -s -b "$CJ2" -o /tmp/ff-mov2.json -w "%{http_code}" -X POST "$BASE/ap
 [ "$COD" = "201" ] && ok "Usuario temporal registra movimiento (201)" || { mal "Movimiento temporal ($COD)"; cat /tmp/ff-mov2.json; }
 MOVID2=$(jv /tmp/ff-mov2.json "['id']")
 
+# El usuario con registros también se elimina (va a papelera con snapshot)
 COD=$(curl -s -b "$CJ" -o /tmp/ff-err.json -w "%{http_code}" -X DELETE "$BASE/api/usuarios/$U2")
-ERR=$(jv /tmp/ff-err.json "['error']" 2>/dev/null)
-[ "$COD" = "409" ] && [ "$ERR" = "USUARIO_CON_REGISTROS" ] && ok "DELETE usuario con registros → 409 USUARIO_CON_REGISTROS" || mal "Usuario con registros → $COD $ERR"
+[ "$COD" = "200" ] && ok "DELETE usuario con registros → 200 (papelera)" || { mal "Usuario con registros → $COD"; cat /tmp/ff-err.json; }
 
-# Auto-eliminación bloqueada
+ESTA=$(curl -s -b "$CJ" "$BASE/api/usuarios" | python3 -c "import sys,json; print(any(u['correo']=='temp.e2e@cig-manufacturing.com' for u in json.load(sys.stdin)['usuarios']))")
+[ "$ESTA" = "False" ] && ok "Usuario temporal fuera del listado vivo" || mal "El usuario sigue apareciendo"
+
+# El usuario eliminado ya no puede iniciar sesión
+COD=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{"correo":"temp.e2e@cig-manufacturing.com","password":"Temporal*2024"}')
+[ "$COD" = "401" ] && ok "Login del usuario eliminado → 401" || mal "Login eliminado ($COD)"
+
+# Auto-eliminación bloqueada (el usuario de referencia sigue vivo)
 COD=$(curl -s -b "$CJ" -o /tmp/ff-err.json -w "%{http_code}" -X DELETE "$BASE/api/usuarios/$ADMIN_ID")
 ERR=$(jv /tmp/ff-err.json "['error']" 2>/dev/null)
 [ "$COD" = "400" ] && [ "$ERR" = "NO_AUTO_ELIMINARSE" ] && ok "Auto-eliminación → 400 NO_AUTO_ELIMINARSE" || mal "Auto-eliminación → $COD $ERR"
 
-# Limpiar: borrar movimiento del temporal y luego el usuario sí es eliminable
+# Limpieza final: movimiento del temporal eliminado (sigue corregible:
+# el usuario es una referencia suave, no congela el historial)
 COD=$(curl -s -b "$CJ" -o /dev/null -w "%{http_code}" -X DELETE "$BASE/api/almacen/movimientos/$MOVID2" \
   -H "Content-Type: application/json" -d '{"motivoCorreccion":"Limpieza E2E usuario temporal"}')
 [ "$COD" = "200" ] && ok "Limpieza: movimiento del temporal eliminado" || mal "Limpiar movimiento ($COD)"
@@ -208,12 +262,6 @@ COD=$(curl -s -b "$CJ" -o /dev/null -w "%{http_code}" -X DELETE "$BASE/api/almac
 [ "$COD" = "200" ] || mal "Limpiar producto temporal ($COD)"
 COD=$(curl -s -b "$CJ" -o /dev/null -w "%{http_code}" -X DELETE "$BASE/api/almacen/almacenes/$AID2")
 [ "$COD" = "200" ] || mal "Limpiar almacén temporal ($COD)"
-
-COD=$(curl -s -b "$CJ" -o /dev/null -w "%{http_code}" -X DELETE "$BASE/api/usuarios/$U2")
-[ "$COD" = "200" ] && ok "Usuario temporal eliminado tras limpiar sus registros" || mal "Eliminar usuario temporal ($COD)"
-
-ESTA=$(curl -s -b "$CJ" "$BASE/api/usuarios" | python3 -c "import sys,json; print(any(u['correo']=='temp.e2e@cig-manufacturing.com' for u in json.load(sys.stdin)['usuarios']))")
-[ "$ESTA" = "False" ] && ok "Usuario borrado de la BD" || mal "El usuario sigue existiendo"
 
 # ---------- Resumen ----------
 echo ""
