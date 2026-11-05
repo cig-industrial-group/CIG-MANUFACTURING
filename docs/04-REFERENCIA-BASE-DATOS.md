@@ -1,6 +1,6 @@
 # 04 — Referencia de Base de Datos
 
-> **Proyecto:** CIG-MANUFACTURING · **Versión documentada:** 1.1.0 · **Rama:** `main`
+> **Proyecto:** CIG-MANUFACTURING · **Versión documentada:** 1.1.1 · **Rama:** `main`
 > Suite de documentación arquitectónica — Parte 4 de 6.
 >
 > Fuente única de verdad: `prisma/schema.prisma` (motor **SQLite**, generador

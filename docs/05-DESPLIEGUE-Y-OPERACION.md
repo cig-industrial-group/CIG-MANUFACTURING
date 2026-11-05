@@ -1,6 +1,6 @@
 # 05 — Despliegue y Operación
 
-> **Proyecto:** CIG-MANUFACTURING · **Versión documentada:** 1.1.0 · **Rama:** `main`
+> **Proyecto:** CIG-MANUFACTURING · **Versión documentada:** 1.1.1 · **Rama:** `main`
 > Suite de documentación arquitectónica — Parte 5 de 6.
 >
 > Este documento consolida y actualiza `README-DEPLOY.md` (que mantiene vigencia como
@@ -378,3 +378,68 @@ autenticación y afirma la matriz completa de atributos (producción con/sin
 `COOKIE_INSEGURA_HTTP`, desarrollo y logout) más la coherencia
 `exp − iat = 86400` del JWT emitido. Ejecútala tras cualquier cambio en esta
 área.
+
+---
+
+## 8. Seguridad de cadena de suministro (dependencias)
+
+Referencia operativa de la auditoría de dependencias integrada en el build
+de la imagen Docker (decisión y justificación completas en
+[ADR-008](./06-REGISTRO-DECISIONES-ARQUITECTONICAS%20(ADR).md)).
+
+### 8.1 La puerta del Dockerfile
+
+```dockerfile
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
+RUN bun audit --audit-level=high      # ← Fase 5
+COPY . .
+RUN bunx prisma generate && bun run build
+```
+
+- `bun audit` consulta en tiempo real los advisories publicados contra el
+  árbol EXACTO que el build está a punto de compilar (lockfile congelado).
+- **Umbral High/Crítica**: si existe alguna vulnerabilidad de severidad
+  Alta o Crítica, el comando sale con código 1 y `docker build` SE DETIENE.
+- La capa se cachea junto a la de dependencias: solo se re-audita cuando
+  cambian `package.json` o `bun.lock`.
+- Nota: `bun audit` no tiene bandera `--severity`; su umbral nativo es
+  `--audit-level` (misma semántica que `npm audit --audit-level`). No se
+  usa `npm audit` porque exigiría un `package-lock.json` inexistente.
+
+### 8.2 Qué hacer cuando la puerta se cierra
+
+El build se detiene cuando se publica un aviso High/Crítica nuevo contra
+cualquier dependencia (directa o transitiva). Recuperación:
+
+```bash
+bun update                        # actualiza dentro de los rangos semver
+bun audit --audit-level=high      # debe salir limpio (código 0)
+bash scripts/simulacion-ci.sh     # revalida TODO antes de volver a construir
+```
+
+- Si `bun update` no alcanza la versión corregida (rango que no la permite,
+  como `^0.34.x` para sharp 0.35), sube el rango explícito de la dependencia
+  directa en `package.json` (`bun add paquete@^versión-corregida`).
+- Si el paquete vulnerable está fijado EXACTAMENTE por un intermediario
+  (p. ej. `@prisma/config` y `deepmerge-ts`), usa `overrides` en
+  `package.json` y documenta el motivo y la retirada prevista.
+- Nunca pases la puerta con `--ignore=<CVE>` sin una justificación escrita
+  en el ADR correspondiente.
+
+### 8.3 Estado actual y excepciones
+
+- Árbol verificado limpio a nivel High/Crítica en el entregable de la
+  Fase 5 (`bun audit --audit-level=high` → código 0).
+- **1 aviso `moderate` aceptado** (documentado en ADR-008): `minimatch`
+  ≥7.0.0 <11.0.1 (GHSA-g3hv-m249, DoS por amplificación de glob) en la
+  cadena de `devDependencies` de ESLint/TypeScript-ESTree; se retira de la
+  imagen en la etapa de poda (`bun install --production`) y corregirlo
+  exigiría un override mayor sobre la herramienta de lint. Reevaluar cuando
+  typescript-eslint publique el salto a minimatch 11.
+- Verificación local en cualquier momento:
+
+```bash
+bun audit --audit-level=high   # 0 = limpio; 1 = hay High/Crítica (bloquea build)
+bun scripts/prueba-humo-fase5.ts
+```

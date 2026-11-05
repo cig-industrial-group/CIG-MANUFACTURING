@@ -3,7 +3,7 @@
 > ⚖️ **AVISO LEGAL:** Copyright © 2026 Emmanuel Caballero De La Rosa. Todos los derechos reservados.  
 > Tijuana, Baja California, México. Este proyecto es propiedad privada y confidencial. Queda prohibida su reproducción, distribución o uso no autorizado sin permiso explícito por escrito.
 
-**Versión:** 1.1.0 — incluye el módulo de Branding (Identidad Visual) en Ajustes y la suite de documentación de `/docs/`.
+**Versión:** 1.1.1 — incluye el módulo de Branding (Identidad Visual) en Ajustes, la suite de documentación de `/docs/` y el endurecimiento de seguridad de las Fases 1–5 (reintentos, observabilidad, respuestas de error, sesiones y cookies, y auditoría de cadena de suministro en el build).
 
 Sistema web bilingüe (Español / Inglés) para el control y la gestión de almacén de fábrica:
 inventario multi-almacén, entradas, recepción de materia prima, salidas, traslados, ajustes,
