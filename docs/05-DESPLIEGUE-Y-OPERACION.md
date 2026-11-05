@@ -328,3 +328,53 @@ Para desarrollo o evaluación sin `deploy.sh`, el repositorio incluye el flujo e
 Detalles de Docker y del entorno de desarrollo (incluidas las pruebas E2E de
 `scripts/`) en el `README.md` del repositorio y en
 [03-GUIA-DESARROLLO-NUEVOS-MODULOS.md](./03-GUIA-DESARROLLO-NUEVOS-MODULOS.md).
+
+---
+
+## 7. Seguridad de sesiones y cookies
+
+Referencia operativa de la política de la cookie de sesión
+`cig_manufacturing_sesion` (decisión y justificación completas en
+[ADR-007](./06-REGISTRO-DECISIONES-ARQUITECTONICAS%20(ADR).md)). La emite y
+elimina exclusivamente `src/modulos/autenticacion/servicios/auth.ts`
+(`conCookieSesion`/`sinCookieSesion`); las rutas que crean sesión son
+`/api/auth/login`, `/api/auth/registro` y `/api/auth/recuperacion/confirmar`,
+y `/api/auth/logout` la elimina.
+
+### 7.1 Atributos fijos (siempre)
+
+| Atributo | Valor | Efecto |
+|---|---|---|
+| `HttpOnly` | siempre | El JWT no es accesible a JavaScript del navegador: un XSS no puede expropiar la sesión |
+| `SameSite=Strict` | siempre | La cookie no se envía en peticiones iniciadas desde otro sitio: CSRF cerrado en origen. Entrar desde un enlace externo muestra el login (la sesión no viaja); dentro del sitio nada cambia |
+| `Path=/` | siempre | Disponible en toda la aplicación |
+
+### 7.2 Atributo condicional
+
+| `Secure` | Condición |
+|---|---|
+| `Secure` (sí) | `NODE_ENV=production` **y** `COOKIE_INSEGURA_HTTP ≠ 1` → la cookie solo viaja por HTTPS |
+| sin `Secure` | desarrollo, o producción con `COOKIE_INSEGURA_HTTP=1` (LAN sin TLS; **avisa por consola en cada arranque**) |
+
+Regla operativa: si despliegas con dominio y TLS, no definas
+`COOKIE_INSEGURA_HTTP` (o déjala en `0`). Si despliegas en LAN sin TLS,
+defínela en `1` o el login será imposible (el navegador descarta la cookie
+`Secure` recibida por HTTP claro).
+
+### 7.3 Expiración
+
+- **24 horas**, idénticas en el `exp` del JWT y en el `maxAge` de la cookie:
+  caducan juntas. No hay token de refresco.
+- Revocación real: cada petición autenticada recarga el usuario desde la BD;
+  desactivar o eliminar al usuario cierra su sesión al instante, sin esperar
+  la expiración.
+- Cambiar `AUTH_SECRET` invalida TODAS las sesiones de golpe (rotación de
+  secreto; ver §2 del doc 02).
+
+### 7.4 Verificación
+
+`bun scripts/prueba-humo-fase4.ts` ejecuta logins reales contra el módulo de
+autenticación y afirma la matriz completa de atributos (producción con/sin
+`COOKIE_INSEGURA_HTTP`, desarrollo y logout) más la coherencia
+`exp − iat = 86400` del JWT emitido. Ejecútala tras cualquier cambio en esta
+área.

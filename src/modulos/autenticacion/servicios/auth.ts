@@ -12,6 +12,11 @@
  * MÓDULO: AUTENTICACIÓN — Servicios de servidor
  * Hash de contraseñas (bcrypt), sesiones JWT (jose) en cookie httpOnly
  * y guardas de permisos para las rutas API.
+ *
+ * Política de cookie de sesión (Fase 4 — ADR-007): SIEMPRE `HttpOnly`,
+ * `SameSite=Strict` y `Path=/`; `Secure` únicamente cuando
+ * `NODE_ENV=production` Y `COOKIE_INSEGURA_HTTP !== "1"` (escape
+ * documentado para LAN sin TLS). Expiración: 24 h (JWT y maxAge).
  */
 import { SignJWT, jwtVerify } from "jose";
 import bcrypt from "bcryptjs";
@@ -21,7 +26,16 @@ import type { UsuarioSesion } from "../tipos";
 import { obtenerSecretoFirmado, esProduccion } from "./seguridad";
 
 export const COOKIE_SESION = "cig_manufacturing_sesion";
-const DURACION_SESION_SEG = 60 * 60 * 24 * 7; // 7 días
+
+/**
+ * Duración de la sesión: 24 horas (Fase 4 — ADR-007). El mismo valor fija
+ * la expiración del JWT (`exp`) y el `maxAge` de la cookie, de modo que
+ * cookie y token caducan a la vez. No existe token de refresco: cada
+ * petición autenticada recarga el usuario desde la BD (revocación efectiva),
+ * por lo que la expiración es solo el límite de la ventana de exposición
+ * de una cookie expropiada.
+ */
+const DURACION_SESION_SEG = 60 * 60 * 24; // 24 horas
 
 // El secreto se resuelve y valida de forma PEREZOSA (al primer uso) y se
 // memoriza. La validación de arranque vive en src/instrumentation.ts; esta
@@ -185,7 +199,7 @@ function cookieSegura(): boolean {
 export function conCookieSesion(respuesta: NextResponse, token: string): NextResponse {
   respuesta.cookies.set(COOKIE_SESION, token, {
     httpOnly: true,
-    sameSite: "lax",
+    sameSite: "strict",
     secure: cookieSegura(),
     path: "/",
     maxAge: DURACION_SESION_SEG,
@@ -193,10 +207,11 @@ export function conCookieSesion(respuesta: NextResponse, token: string): NextRes
   return respuesta;
 }
 
-/** Elimina la cookie de sesión */
+/** Elimina la cookie de sesión (maxAge 0; mismos atributos que la emisión) */
 export function sinCookieSesion(respuesta: NextResponse): NextResponse {
   respuesta.cookies.set(COOKIE_SESION, "", {
     httpOnly: true,
+    sameSite: "strict",
     secure: cookieSegura(),
     path: "/",
     maxAge: 0,
