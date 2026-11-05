@@ -90,6 +90,9 @@ jobs:
       # La lista negra de valores prohibidos vive POR DISEÑO en
       # seguridad.ts, validar-auth-secret.sh y deploy.sh (para
       # RECHAZARLOS); se excluyen de la búsqueda de presencia.
+      # docs/ también se excluye: la documentación de arquitectura
+      # cita esos valores como ejemplos de la lista negra (documenta
+      # el bloqueo, no usa el secreto). La guardia vigila código.
       - name: "Guardia: sin secretos inseguros en el código"
         run: |
           PROBLEMA=0
@@ -105,7 +108,7 @@ jobs:
           fi
           # 3) Credenciales fijas publicadas
           if grep -rn --exclude='simulacion-ci.sh' --exclude='ci.yml' \
-            --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=db \
+            --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=db --exclude-dir=docs \
             -e 'Admin\*2024' -e 'Ti\*2024' . ; then
             echo "::error title=credencial publicada::Queda una credencial fija publicada en el repositorio (patrones Admin/Ti del 2024)."
             PROBLEMA=1
@@ -113,7 +116,7 @@ jobs:
           # 4) Secretos de desarrollo históricos usados como valor
           #    (fuera de la lista negra declarada)
           if grep -rn --exclude='seguridad.ts' --exclude='validar-auth-secret.sh' --exclude='deploy.sh' --exclude='simulacion-ci.sh' --exclude='ci.yml' \
-            --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=db --exclude-dir=.git \
+            --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=db --exclude-dir=.git --exclude-dir=docs \
             -e 'cig-manufacturing-secreto-desarrollo' -e 'fabriflow-secreto-desarrollo' . ; then
             echo "::error title=secreto inseguro::Un secreto de desarrollo histórico se usa como valor (ver arriba)."
             PROBLEMA=1

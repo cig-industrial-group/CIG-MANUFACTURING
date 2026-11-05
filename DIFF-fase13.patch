@@ -1,0 +1,96 @@
+--- /tmp/orig/CIG-MANUFACTURING-1.0.0/README.md	2026-11-05 00:44:30.000000000 +0000
++++ repo/CIG-MANUFACTURING-1.0.0/README.md	2026-11-05 02:31:55.479744496 +0000
+@@ -65,8 +65,8 @@
+ ```
+ cig-manufacturing/
+ ├── prisma/
+-│   ├── schema.prisma        # Modelo de datos (9 tablas)
+-│   └── seed.ts              # Semilla: roles, usuarios y configuración
++│   ├── schema.prisma        # Modelo de datos (21 modelos)
++│   └── seed.ts              # Semilla: roles, configuración y admin inicial
+ ├── db/
+ │   └── custom.db            # Base de datos SQLite (se crea con setup.sh)
+ ├── src/
+@@ -77,9 +77,11 @@
+ │   │   ├── autenticacion/   # Sesión, permisos, pantalla de acceso
+ │   │   ├── almacen/         # Productos, almacenes, inventario, movimientos, QR
+ │   │   ├── catalogo/        # Modelos y números de parte (asociación N:M)
++│   │   ├── clientes/        # Catálogo de clientes
++│   │   ├── oqc/             # Calidad de salida: liberaciones, scrap, rechazos
+ │   │   ├── usuarios/        # Gestión de usuarios y roles
+ │   │   ├── ajustes/         # Ajustes del sistema
+-│   │   ├── nucleo/          # Panel principal
++│   │   ├── nucleo/          # Registro de módulos y panel principal
+ │   │   └── compartidos/     # Idioma ES/EN, errores, UI compartida
+ │   ├── hooks/               # use-toast, use-mobile
+ │   └── lib/                 # Cliente Prisma, utilidades
+@@ -106,8 +108,10 @@
+ 32 caracteres, generado por `setup.sh`). Si falta o es inválido, la aplicación
+ **no inicia**. Ver [`.env.example`](./.env.example).
+ 
+-La guía completa (PM2, systemd, Nginx, Docker, respaldos, actualizaciones y solución de
+-problemas) está en **[DESPLIEGUE.md](./DESPLIEGUE.md)**.
++La guía completa de despliegue de producción (Ubuntu 22.04 con `deploy.sh`, TLS vía
++Cloudflare DNS-01, systemd, Caddy, Docker, respaldos y solución de problemas) está en
++**[docs/05-DESPLIEGUE-Y-OPERACION.md](./docs/05-DESPLIEGUE-Y-OPERACION.md)** y
++**[README-DEPLOY.md](./README-DEPLOY.md)**.
+ 
+ ## Desarrollo
+ 
+@@ -121,6 +125,12 @@
+ 
+ Variables de entorno: ver [`.env.example`](./.env.example).
+ 
++**Para desarrollar e integrar un módulo nuevo** (base de datos, permisos, API,
++lógica, UI y pruebas, paso a paso con código de referencia), sigue la guía
++**[docs/03-GUIA-DESARROLLO-NUEVOS-MODULOS.md](./docs/03-GUIA-DESARROLLO-NUEVOS-MODULOS.md)**.
++La arquitectura general del sistema está documentada en
++[docs/02-ARQUITECTURA-DEL-SISTEMA.md](./docs/02-ARQUITECTURA-DEL-SISTEMA.md).
++
+ ### Pruebas
+ 
+ ```bash
+@@ -131,18 +141,18 @@
+ 
+ ## Modelo de datos (resumen)
+ 
+-- `Rol` — clave, nombre ES/EN, permisos (JSON), bandera de sistema
+-- `Usuario` — nombre, correo, hash de contraseña, rol, estado, bandera de cambio de password
+-- `Restablecimiento` — códigos de recuperación de contraseña con expiración
+-- `Configuracion` — ajustes clave/valor (banderas de auth, rol de autoregistro)
+-- `Almacen` — código, nombre, ubicación, tipo, responsable
+-- `Producto` — SKU, nombre, categoría, unidad, stock mínimo, costo
+-- `Stock` — existencias por producto × almacén (único por combinación)
+-- `Movimiento` — folio, tipo, origen/destino, cantidad, snapshot, referencia, responsable
+-- `CorreccionMovimiento` — bitácora inmutable de ediciones/eliminaciones de movimientos
+-- `Modelo` — código, nombre, descripción (catálogo técnico)
+-- `NumeroParte` — número, nombre, descripción (refacciones/componentes)
+-- `ModeloParte` — tabla de unión N:M entre modelos y números de parte
++La base de datos es un único archivo SQLite con **21 modelos** definidos en
++[`prisma/schema.prisma`](./prisma/schema.prisma): autenticación (`Rol`, `Usuario`,
++`Restablecimiento`, `Configuracion`), almacén (`Almacen`, `Producto`, `Stock`,
++`Movimiento`, `CorreccionMovimiento`, `SecuenciaFolio`), unidades (`UnidadMedida`),
++catálogo técnico (`Modelo`, `NumeroParte`, `ModeloParte`), clientes (`Cliente`),
++calidad de salida (`SalidaOQC`, `RegistroScrap`, `RegistroRechazo`), papelera
++(`Papelera`) y respaldo (`RespaldoBD`, `RestauracionBD`).
++
++**El diccionario de datos completo** — campo por campo, con los comportamientos
++especiales (folios monotónicos, papelera de 3 niveles, snapshots inmutables,
++restauración en caliente) — está en
++**[docs/04-REFERENCIA-BASE-DATOS.md](./docs/04-REFERENCIA-BASE-DATOS.md)**.
+ 
+ ## Licencia
+ 
+--- /tmp/orig/CIG-MANUFACTURING-1.0.0/DESPLIEGUE.md	2026-11-05 00:44:30.000000000 +0000
++++ repo/CIG-MANUFACTURING-1.0.0/DESPLIEGUE.md	2026-11-05 02:31:11.145466626 +0000
+@@ -1,5 +1,10 @@
+ # Guía de despliegue — CIG-MANUFACTURING
+ 
++> ⚠️ **DEPRECADO:** Este documento ha sido reemplazado por la suite de documentación en
++> [`docs/05-DESPLIEGUE-Y-OPERACION.md`](./docs/05-DESPLIEGUE-Y-OPERACION.md) y
++> [`README-DEPLOY.md`](./README-DEPLOY.md). **No utilizar para nuevos despliegues.**
++> El contenido que sigue se conserva únicamente como referencia histórica.
++
+ Guía completa para desplegar CIG-MANUFACTURING en tu propio servidor (Linux recomendado;
+ también aplica a macOS y Windows con WSL).
+ 

@@ -1,5 +1,10 @@
 # Guía de despliegue — CIG-MANUFACTURING
 
+> ⚠️ **DEPRECADO:** Este documento ha sido reemplazado por la suite de documentación en
+> [`docs/05-DESPLIEGUE-Y-OPERACION.md`](./docs/05-DESPLIEGUE-Y-OPERACION.md) y
+> [`README-DEPLOY.md`](./README-DEPLOY.md). **No utilizar para nuevos despliegues.**
+> El contenido que sigue se conserva únicamente como referencia histórica.
+
 Guía completa para desplegar CIG-MANUFACTURING en tu propio servidor (Linux recomendado;
 también aplica a macOS y Windows con WSL).
 
