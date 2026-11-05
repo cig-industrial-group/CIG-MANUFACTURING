@@ -99,6 +99,11 @@ export function claveErrorApi(codigo: string): string {
     REGISTRO_DESHABILITADO: "auth.registroCerradoSub",
     RECUPERACION_DESHABILITADA: "auth.recuperacionCerradaSub",
 
+    // ===== Branding (identidad visual: logo y favicon) =====
+    BRANDING_ARCHIVO_INVALIDO: "ajustes.branding.errBRANDING_ARCHIVO_INVALIDO",
+    BRANDING_TAMANNO_EXCEDIDO: "ajustes.branding.errBRANDING_TAMANNO_EXCEDIDO",
+    BRANDING_ERROR_GUARDADO: "ajustes.branding.errBRANDING_ERROR_GUARDADO",
+
     // ===== Usuarios y roles =====
     CORREO_EN_USO: "auth.errorCorreoExiste",
     ROL_NO_EXISTE: "comun.errorGenerico",

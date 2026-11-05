@@ -1,6 +1,6 @@
 # 06 — Registro de Decisiones Arquitectónicas (ADR)
 
-> **Proyecto:** CIG-MANUFACTURING · **Versión documentada:** 1.0.0 · **Rama:** `main`
+> **Proyecto:** CIG-MANUFACTURING · **Versión documentada:** 1.1.0 · **Rama:** `main`
 > Suite de documentación arquitectónica — Parte 6 de 6.
 >
 > Formato: cada ADR responde al **«¿por qué?»** de una decisión clave: contexto,

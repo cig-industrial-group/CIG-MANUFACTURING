@@ -21,7 +21,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { create } from "zustand";
 import {
-  Factory,
   Menu,
   Lock,
   LogOut,
@@ -31,6 +30,7 @@ import {
 } from "lucide-react";
 import { ProveedorIdioma, useIdioma } from "@/modulos/compartidos/idioma";
 import { ConmutadorIdioma } from "@/modulos/compartidos/ui";
+import { useVersionBranding, urlLogo } from "@/modulos/compartidos/branding";
 import {
   MODULOS,
   modulosPermitidos,
@@ -66,14 +66,20 @@ const CLAVE_SECCION = "cig-manufacturing.seccion";
 
 // ============================================================
 // MARCA / LOGOTIPO
+// Logo dinámico: lo sirve /api/branding/logo (personalizado si fue
+// subido desde Ajustes → Identidad Visual; predeterminado en otro
+// caso). La versión invalida la caché del navegador al cambiarlo.
 // ============================================================
 function Marca() {
   const { t } = useIdioma();
+  const version = useVersionBranding();
   return (
     <div className="flex items-center gap-3 px-1">
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-lg">
-        <Factory className="h-5 w-5" aria-hidden />
-      </div>
+      <img
+        src={urlLogo(version)}
+        alt={t("app.nombre")}
+        className="h-10 w-10 shrink-0 rounded-xl object-contain shadow-lg"
+      />
       <div className="min-w-0">
         <p className="truncate text-base font-bold leading-tight text-foreground">
           {t("app.nombre")}
@@ -360,6 +366,7 @@ function ContenidoPrincipal({ permisos }: { permisos: string[] }) {
   const { seccion, cambiar } = useSeccionActiva();
   const { moduloId } = useModuloStore();
   const [menuAbierto, setMenuAbierto] = useState(false);
+  const versionBranding = useVersionBranding();
 
   const modulo = MODULOS.find((m) => m.id === moduloId && m.disponible);
   // Secciones y módulos visibles derivan de datos estables (MODULOS y los
@@ -417,9 +424,11 @@ function ContenidoPrincipal({ permisos }: { permisos: string[] }) {
         </Sheet>
 
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <Factory className="h-4 w-4" aria-hidden />
-          </div>
+          <img
+            src={urlLogo(versionBranding)}
+            alt={t("app.nombre")}
+            className="h-8 w-8 shrink-0 rounded-lg object-contain"
+          />
           <div className="min-w-0">
             <p className="truncate text-sm font-bold leading-tight">{t("app.nombre")}</p>
             <p className="truncate text-[11px] leading-tight text-muted-foreground">
@@ -487,11 +496,14 @@ function ContenidoPrincipal({ permisos }: { permisos: string[] }) {
 // ============================================================
 function PantallaCarga() {
   const { t } = useIdioma();
+  const version = useVersionBranding();
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background">
-      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-xl">
-        <Factory className="h-7 w-7" aria-hidden />
-      </div>
+      <img
+        src={urlLogo(version)}
+        alt={t("app.nombre")}
+        className="h-14 w-14 rounded-2xl object-contain shadow-xl"
+      />
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
         {t("comun.cargando")}

@@ -18,7 +18,6 @@
 import { useState, type FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Factory,
   LogIn,
   UserPlus,
   Lock,
@@ -36,6 +35,7 @@ import {
 import { useIdioma } from "@/modulos/compartidos/idioma";
 import { ConmutadorIdioma } from "@/modulos/compartidos/ui";
 import { claveErrorApi } from "@/modulos/compartidos/errores";
+import { useVersionBranding, urlLogo } from "@/modulos/compartidos/branding";
 import { useSesion } from "../servicios/sesion";
 import {
   ErrorApiAuth,
@@ -69,6 +69,7 @@ function claveError(e: unknown): string {
 // ============================================================
 function PanelMarca() {
   const { t } = useIdioma();
+  const version = useVersionBranding();
   const caracteristicas = [
     { icono: Boxes, texto: t("nav.descripcionInventario") },
     { icono: History, texto: t("nav.descripcionHistorial") },
@@ -96,9 +97,11 @@ function PanelMarca() {
       />
 
       <div className="relative z-10 flex items-center gap-3 p-10">
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-xl">
-          <Factory className="h-6 w-6" aria-hidden />
-        </div>
+        <img
+          src={urlLogo(version)}
+          alt={t("app.nombre")}
+          className="h-12 w-12 rounded-2xl object-contain shadow-xl"
+        />
         <div>
           <p className="text-xl font-bold text-white">{t("app.nombre")}</p>
           <p className="text-sm text-zinc-400">{t("app.eslogan")}</p>
@@ -379,6 +382,7 @@ export function PantallaAutenticacion() {
   const { t } = useIdioma();
   const { toast } = useToast();
   const { iniciarSesion, registrarse } = useSesion();
+  const versionBranding = useVersionBranding();
   const { data: banderas } = useQuery<BanderasAuth>({
     queryKey: ["auth", "banderas"],
     queryFn: obtenerBanderas,
@@ -439,9 +443,11 @@ export function PantallaAutenticacion() {
 
         {/* Marca móvil */}
         <div className="mb-8 flex items-center gap-3 lg:hidden">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-lg">
-            <Factory className="h-5 w-5" aria-hidden />
-          </div>
+          <img
+            src={urlLogo(versionBranding)}
+            alt={t("app.nombre")}
+            className="h-11 w-11 rounded-xl object-contain shadow-lg"
+          />
           <div>
             <p className="text-lg font-bold leading-tight">{t("app.nombre")}</p>
             <p className="text-xs text-muted-foreground">{t("app.eslogan")}</p>

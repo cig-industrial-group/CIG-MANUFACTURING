@@ -23,6 +23,70 @@ export class ErrorApiAjustes extends Error {
   }
 }
 
+// ============================================================
+// BRANDING (Identidad Visual) — tipos y límites del cliente
+// ============================================================
+
+export interface EstadoActivoBranding {
+  url: string;
+  personalizado: boolean;
+  tipo: string | null;
+  tamanoBytes: number | null;
+  actualizadoEn: string | null;
+}
+
+export interface EstadoBranding {
+  logo: EstadoActivoBranding;
+  favicon: EstadoActivoBranding;
+}
+
+/** Límites del cliente (espejo de los validados en el servidor) */
+export const LIMITES_BRANDING = {
+  logoTamanoMaxBytes: 2 * 1024 * 1024, // 2 MB
+  faviconTamanoMaxBytes: 500 * 1024, // 500 KB
+  logoTipos: ["png", "svg", "jpg"],
+  faviconTipos: ["ico", "png"],
+} as const;
+
+async function pedirBranding(url: string, init?: RequestInit): Promise<{ branding: EstadoBranding }> {
+  const resp = await fetch(url, init);
+  if (!resp.ok) {
+    let codigo = "ERROR_INTERNO";
+    try {
+      const cuerpo = await resp.json();
+      if (cuerpo?.error) codigo = cuerpo.error;
+    } catch {
+      /* respuesta sin JSON */
+    }
+    throw new ErrorApiAjustes(codigo);
+  }
+  return resp.json() as Promise<{ branding: EstadoBranding }>;
+}
+
+/** GET /api/ajustes/branding — estado del logo y favicon */
+export const obtenerBranding = () => pedirBranding("/api/ajustes/branding");
+
+/** POST /api/ajustes/branding/logo — subir logo (multipart, campo «archivo») */
+export const subirLogo = (archivo: File) => {
+  const formulario = new FormData();
+  formulario.append("archivo", archivo);
+  return pedirBranding("/api/ajustes/branding/logo", { method: "POST", body: formulario });
+};
+
+/** DELETE /api/ajustes/branding/logo — restaurar logo predeterminado */
+export const restaurarLogo = () => pedirBranding("/api/ajustes/branding/logo", { method: "DELETE" });
+
+/** POST /api/ajustes/branding/favicon — subir favicon (multipart, campo «archivo») */
+export const subirFavicon = (archivo: File) => {
+  const formulario = new FormData();
+  formulario.append("archivo", archivo);
+  return pedirBranding("/api/ajustes/branding/favicon", { method: "POST", body: formulario });
+};
+
+/** DELETE /api/ajustes/branding/favicon — restaurar favicon predeterminado */
+export const restaurarFavicon = () =>
+  pedirBranding("/api/ajustes/branding/favicon", { method: "DELETE" });
+
 export interface RespuestaAjustes {
   ajustes: AjustesSistema;
   roles: Array<{ id: string; clave: string; nombre: string; nombreEn: string }>;

@@ -23,20 +23,33 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export const metadata: Metadata = {
-  title: "CIG-MANUFACTURING — Sistema de Gestión de Fábrica | Factory Management System",
-  description:
-    "Control y gestión de almacén: inventario, entradas, salidas, traslados, recepción de materia prima e historial de movimientos. Bilingüe ES/EN. | Warehouse management: inventory, inbound, outbound, transfers, raw material reception and movement history. Bilingual ES/EN.",
-  keywords: [
-    "gestión de fábrica",
-    "almacén",
-    "inventario",
-    "WMS",
-    "warehouse management",
-    "inventory",
-    "factory system",
-  ],
-};
+/**
+ * generateMetadata: el favicon lo sirve la ruta dinámica
+ * /api/branding/favicon (personalizado si existe; predeterminado en
+ * otro caso). Como el contenido lo resuelve la API en cada petición,
+ * cambiar el favicon desde Ajustes no requiere recompilar: el
+ * <link rel="icon" href="/api/branding/favicon" /> es estable y la
+ * caché del navegador se refresca en ≤ 1 h (max-age=3600).
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  return {
+    title: "CIG-MANUFACTURING — Sistema de Gestión de Fábrica | Factory Management System",
+    description:
+      "Control y gestión de almacén: inventario, entradas, salidas, traslados, recepción de materia prima e historial de movimientos. Bilingüe ES/EN. | Warehouse management: inventory, inbound, outbound, transfers, raw material reception and movement history. Bilingual ES/EN.",
+    keywords: [
+      "gestión de fábrica",
+      "almacén",
+      "inventario",
+      "WMS",
+      "warehouse management",
+      "inventory",
+      "factory system",
+    ],
+    icons: {
+      icon: "/api/branding/favicon",
+    },
+  };
+}
 
 export const viewport: Viewport = {
   width: "device-width",

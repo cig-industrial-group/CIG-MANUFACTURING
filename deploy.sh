@@ -8,7 +8,7 @@
 # ============================================================================
 
 # ============================================================
-# CIG-MANUFACTURING — Instalador automatizado de despliegue
+# CIG-MANUFACTURING v1.1.0 — Instalador automatizado de despliegue
 # para producción con aislamiento de seguridad extremo.
 #
 # QUÉ HACE (Ubuntu 22.04 LTS virgen → producción):
@@ -518,6 +518,7 @@ sincronizar_codigo() {
     --exclude='db/' \
     --exclude='logs/' \
     --exclude='backups/' \
+    --exclude='branding/' \
     --exclude='.env' \
     --exclude='server.log' \
     --exclude='dev.log' \
@@ -526,7 +527,7 @@ sincronizar_codigo() {
 
   chown -R "${SERVICE_USER}:${SERVICE_GROUP}" "${APP_DIR}"
   chmod 750 "${APP_DIR}"
-  ok "Código sincronizado (excluidos .git, node_modules, .next, download, upload y estado de producción)"
+  ok "Código sincronizado (excluidos .git, node_modules, .next, download, upload, branding y estado de producción)"
 }
 
 # ------------------------------------------------------------------ .ENV
@@ -588,6 +589,11 @@ compilar_aplicacion() {
   # Logs con umask 077: systemd conservará estos permisos al hacer append.
   como_usuario bash -c "cd '${APP_DIR}' && umask 077 && mkdir -p db logs && touch logs/stdout.log logs/stderr.log"
 
+  # Branding (identidad visual): logo y favicon subidos desde la app.
+  # Se excluye del rsync para no sobrescribir lo subido; 755 porque los
+  # archivos se sirven al público vía /api/branding (ver ReadWritePaths).
+  como_usuario bash -c "cd '${APP_DIR}' && mkdir -p branding && chmod 755 branding"
+
   como_usuario bash -c "cd '${APP_DIR}' && bunx prisma db push --skip-generate"
   ok "Esquema aplicado a la base de datos (db/production.db)"
 
@@ -617,11 +623,11 @@ escribir_unit_app() {
 
   cat > "${destino}" <<EOF
 # ============================================================
-# CIG-MANUFACTURING — Servicio de producción (systemd)
+# CIG-MANUFACTURING v1.1.0 — Servicio de producción (systemd)
 # Generado por deploy.sh — NO editar a mano (se regenera).
 #
-# AISLAMIENTO: el proceso solo puede escribir en db/, logs/ y
-# .next/standalone/.next/cache/ (ReadWritePaths). El resto del
+# AISLAMIENTO: el proceso solo puede escribir en db/, logs/, branding/
+# y .next/standalone/.next/cache/ (ReadWritePaths). El resto del
 # sistema de archivos es de SOLO LECTURA (ProtectSystem=strict)
 # y /home se expone en modo solo-lectura.
 #
@@ -678,6 +684,7 @@ RemoveIPC=yes
 CapabilityBoundingSet=
 ReadWritePaths=${APP_DIR}/db
 ReadWritePaths=${APP_DIR}/logs
+ReadWritePaths=${APP_DIR}/branding
 ReadWritePaths=${APP_DIR}/.next/standalone/.next/cache
 # Endurecimiento adicional opcional (descomentar tras validar en producción):
 # IPAddressDeny=any
@@ -971,7 +978,7 @@ resumen_final() {
 # ------------------------------------------------------------------ MAIN
 main() {
   printf '%s\n' "=============================================================="
-  printf '%s\n' "  CIG-MANUFACTURING — Despliegue de producción seguro"
+  printf '%s\n' "  CIG-MANUFACTURING v1.1.0 — Despliegue de producción seguro"
   printf '%s\n\n' "=============================================================="
 
   verificar_precondiciones

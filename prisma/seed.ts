@@ -74,6 +74,7 @@ export const PERMISOS = [
   "oqc.gestionar",
   "usuarios.gestionar",
   "ajustes.gestionar",
+  "ajustes.branding",
   "respaldo.gestionar",
   "papelera.ver",
   "papelera.gestionar",

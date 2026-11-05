@@ -20,6 +20,11 @@ next-env.d.ts
 # Base de datos local (datos en tiempo de ejecución: nunca al repositorio)
 db/
 
+# Identidad visual subida desde la app (runtime: nunca al repositorio).
+# Anclado a la raíz: NO debe ignorar src/app/api/branding/ ni
+# src/app/api/ajustes/branding/ (rutas de la API de la Fase 14).
+/branding/
+
 # Registros y temporales
 *.log
 .DS_Store

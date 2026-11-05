@@ -38,6 +38,7 @@ import {
   History,
   QrCode,
   Settings2,
+  Palette,
   Trash2,
   Users,
   KeyRound,
@@ -78,7 +79,9 @@ import { ModuloRespaldo } from "@/modulos/respaldo";
 
 /** Enrutador de secciones del módulo Sistema */
 function ModuloSistema({ seccionId }: { seccionId: string }) {
-  if (seccionId === "ajustes") return <ModuloAjustes />;
+  if (seccionId === "ajustes" || seccionId === "branding") {
+    return <ModuloAjustes seccionId={seccionId} />;
+  }
   if (seccionId === "papelera") return <ModuloPapelera />;
   if (seccionId === "respaldo") return <ModuloRespaldo />;
   return <ModuloUsuarios seccionId={seccionId} />;
@@ -182,6 +185,14 @@ export const MODULOS: Array<
         claveGrupo: "nav.administracion",
         icono: Settings2,
         permiso: "ajustes.gestionar",
+      },
+      {
+        id: "branding",
+        claveEtiqueta: "nav.branding",
+        claveDescripcion: "nav.descripcionBranding",
+        claveGrupo: "nav.administracion",
+        icono: Palette,
+        permiso: "ajustes.branding",
       },
       {
         id: "respaldo",

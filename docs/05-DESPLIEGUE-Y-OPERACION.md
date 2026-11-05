@@ -1,6 +1,6 @@
 # 05 — Despliegue y Operación
 
-> **Proyecto:** CIG-MANUFACTURING · **Versión documentada:** 1.0.0 · **Rama:** `main`
+> **Proyecto:** CIG-MANUFACTURING · **Versión documentada:** 1.1.0 · **Rama:** `main`
 > Suite de documentación arquitectónica — Parte 5 de 6.
 >
 > Este documento consolida y actualiza `README-DEPLOY.md` (que mantiene vigencia como

@@ -13,5 +13,7 @@
 /**
  * MÓDULO: AJUSTES
  * Punto de entrada del módulo de configuración del sistema.
+ * Secciones: seguridad/acceso (predeterminada) e identidad visual (branding).
  */
 export { ModuloAjustes } from "./componentes/ModuloAjustes";
+export { SeccionBranding } from "./componentes/SeccionBranding";
