@@ -16,7 +16,7 @@ usuarios, roles y permisos.
 
 | Módulo | Descripción |
 |---|---|
-| **Autenticación** | Inicio de sesión con correo/contraseña, sesiones JWT en cookie httpOnly (7 días), recuperación de contraseña por código, autoregistro configurable, cambio de contraseña. |
+| **Autenticación** | Inicio de sesión con correo/contraseña, sesiones JWT en cookie httpOnly (24 h), recuperación de contraseña por código, autoregistro configurable, cambio de contraseña. |
 | **Almacén** | Catálogo de productos (SKU, categoría, unidad, stock mínimo, costo), gestión de almacenes, inventario consolidado y por almacén, alertas de stock mínimo. |
 | **Movimientos** | Entradas, recepción de materia prima, salidas, traslados entre almacenes, ajustes y scrap; folio automático por tipo (ENT/REC/SAL/TRA/AJU/SCR) con snapshot de stock resultante. Series **monotónicas** (`SecuenciaFolio`): un folio emitido jamás se reutiliza, aunque se elimine el registro que lo portaba. |
 | **Correcciones** | Edición y eliminación de movimientos con bitácora inmutable (`CorreccionMovimiento`) que conserva el estado anterior y el motivo. Contrato explícito: un campo no enviado se conserva y una cadena vacía lo limpia — ninguna corrección parcial puede borrar por accidente la remisión (PL) o el responsable. |

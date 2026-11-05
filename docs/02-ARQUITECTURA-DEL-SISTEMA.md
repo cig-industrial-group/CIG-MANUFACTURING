@@ -52,9 +52,12 @@ Todo el ciclo vive en `src/modulos/autenticacion/servicios/auth.ts`:
    anti-fuerza bruta (5 fallos por IP+cuenta y 20 por IP en 15 minutos; al agotarse
    responde `429` con `Retry-After`). Con credenciales válidas:
    - `crearTokenSesion(usuarioId)` firma un JWT **HS256** con `sub = usuarioId`,
-     emisión y expiración **7 días** (`60 * 60 * 24 * 7`).
+     emisión y expiración **24 horas** (`60 * 60 * 24`; ADR-007). No existe
+     token de refresco: cada petición recarga el usuario desde la BD, por lo
+     que la expiración es el límite de la ventana de exposición de una cookie
+     expropiada, no el mecanismo de revocación.
    - `conCookieSesion()` adjunta la cookie **`cig_manufacturing_sesion`** con
-     `httpOnly: true`, `sameSite: "lax"`, `path: "/"`, `maxAge: 7 días` y
+     `httpOnly: true`, `sameSite: "strict"`, `path: "/"`, `maxAge: 24 h` y
      `secure: true` en producción (solo se omite con `COOKIE_INSEGURA_HTTP=1`,
      que avisa en el arranque).
 2. **Cada petición** — la guarda `requerirPermiso()`:

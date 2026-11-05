@@ -1,0 +1,563 @@
+diff --git a/cig-manufacturing/README.md b/cig-manufacturing/README.md
+index f1f65d9..63b0378 100644
+--- a/cig-manufacturing/README.md
++++ b/cig-manufacturing/README.md
+@@ -16,7 +16,7 @@ usuarios, roles y permisos.
+ 
+ | Módulo | Descripción |
+ |---|---|
+-| **Autenticación** | Inicio de sesión con correo/contraseña, sesiones JWT en cookie httpOnly (7 días), recuperación de contraseña por código, autoregistro configurable, cambio de contraseña. |
++| **Autenticación** | Inicio de sesión con correo/contraseña, sesiones JWT en cookie httpOnly (24 h), recuperación de contraseña por código, autoregistro configurable, cambio de contraseña. |
+ | **Almacén** | Catálogo de productos (SKU, categoría, unidad, stock mínimo, costo), gestión de almacenes, inventario consolidado y por almacén, alertas de stock mínimo. |
+ | **Movimientos** | Entradas, recepción de materia prima, salidas, traslados entre almacenes, ajustes y scrap; folio automático por tipo (ENT/REC/SAL/TRA/AJU/SCR) con snapshot de stock resultante. Series **monotónicas** (`SecuenciaFolio`): un folio emitido jamás se reutiliza, aunque se elimine el registro que lo portaba. |
+ | **Correcciones** | Edición y eliminación de movimientos con bitácora inmutable (`CorreccionMovimiento`) que conserva el estado anterior y el motivo. Contrato explícito: un campo no enviado se conserva y una cadena vacía lo limpia — ninguna corrección parcial puede borrar por accidente la remisión (PL) o el responsable. |
+diff --git a/cig-manufacturing/docs/02-ARQUITECTURA-DEL-SISTEMA.md b/cig-manufacturing/docs/02-ARQUITECTURA-DEL-SISTEMA.md
+index 9089d67..943c62f 100644
+--- a/cig-manufacturing/docs/02-ARQUITECTURA-DEL-SISTEMA.md
++++ b/cig-manufacturing/docs/02-ARQUITECTURA-DEL-SISTEMA.md
+@@ -52,9 +52,12 @@ Todo el ciclo vive en `src/modulos/autenticacion/servicios/auth.ts`:
+    anti-fuerza bruta (5 fallos por IP+cuenta y 20 por IP en 15 minutos; al agotarse
+    responde `429` con `Retry-After`). Con credenciales válidas:
+    - `crearTokenSesion(usuarioId)` firma un JWT **HS256** con `sub = usuarioId`,
+-     emisión y expiración **7 días** (`60 * 60 * 24 * 7`).
++     emisión y expiración **24 horas** (`60 * 60 * 24`; ADR-007). No existe
++     token de refresco: cada petición recarga el usuario desde la BD, por lo
++     que la expiración es el límite de la ventana de exposición de una cookie
++     expropiada, no el mecanismo de revocación.
+    - `conCookieSesion()` adjunta la cookie **`cig_manufacturing_sesion`** con
+-     `httpOnly: true`, `sameSite: "lax"`, `path: "/"`, `maxAge: 7 días` y
++     `httpOnly: true`, `sameSite: "strict"`, `path: "/"`, `maxAge: 24 h` y
+      `secure: true` en producción (solo se omite con `COOKIE_INSEGURA_HTTP=1`,
+      que avisa en el arranque).
+ 2. **Cada petición** — la guarda `requerirPermiso()`:
+diff --git a/cig-manufacturing/docs/05-DESPLIEGUE-Y-OPERACION.md b/cig-manufacturing/docs/05-DESPLIEGUE-Y-OPERACION.md
+index bfb18b6..2b33b09 100644
+--- a/cig-manufacturing/docs/05-DESPLIEGUE-Y-OPERACION.md
++++ b/cig-manufacturing/docs/05-DESPLIEGUE-Y-OPERACION.md
+@@ -328,3 +328,53 @@ Para desarrollo o evaluación sin `deploy.sh`, el repositorio incluye el flujo e
+ Detalles de Docker y del entorno de desarrollo (incluidas las pruebas E2E de
+ `scripts/`) en el `README.md` del repositorio y en
+ [03-GUIA-DESARROLLO-NUEVOS-MODULOS.md](./03-GUIA-DESARROLLO-NUEVOS-MODULOS.md).
++
++---
++
++## 7. Seguridad de sesiones y cookies
++
++Referencia operativa de la política de la cookie de sesión
++`cig_manufacturing_sesion` (decisión y justificación completas en
++[ADR-007](./06-REGISTRO-DECISIONES-ARQUITECTONICAS%20(ADR).md)). La emite y
++elimina exclusivamente `src/modulos/autenticacion/servicios/auth.ts`
++(`conCookieSesion`/`sinCookieSesion`); las rutas que crean sesión son
++`/api/auth/login`, `/api/auth/registro` y `/api/auth/recuperacion/confirmar`,
++y `/api/auth/logout` la elimina.
++
++### 7.1 Atributos fijos (siempre)
++
++| Atributo | Valor | Efecto |
++|---|---|---|
++| `HttpOnly` | siempre | El JWT no es accesible a JavaScript del navegador: un XSS no puede expropiar la sesión |
++| `SameSite=Strict` | siempre | La cookie no se envía en peticiones iniciadas desde otro sitio: CSRF cerrado en origen. Entrar desde un enlace externo muestra el login (la sesión no viaja); dentro del sitio nada cambia |
++| `Path=/` | siempre | Disponible en toda la aplicación |
++
++### 7.2 Atributo condicional
++
++| `Secure` | Condición |
++|---|---|
++| `Secure` (sí) | `NODE_ENV=production` **y** `COOKIE_INSEGURA_HTTP ≠ 1` → la cookie solo viaja por HTTPS |
++| sin `Secure` | desarrollo, o producción con `COOKIE_INSEGURA_HTTP=1` (LAN sin TLS; **avisa por consola en cada arranque**) |
++
++Regla operativa: si despliegas con dominio y TLS, no definas
++`COOKIE_INSEGURA_HTTP` (o déjala en `0`). Si despliegas en LAN sin TLS,
++defínela en `1` o el login será imposible (el navegador descarta la cookie
++`Secure` recibida por HTTP claro).
++
++### 7.3 Expiración
++
++- **24 horas**, idénticas en el `exp` del JWT y en el `maxAge` de la cookie:
++  caducan juntas. No hay token de refresco.
++- Revocación real: cada petición autenticada recarga el usuario desde la BD;
++  desactivar o eliminar al usuario cierra su sesión al instante, sin esperar
++  la expiración.
++- Cambiar `AUTH_SECRET` invalida TODAS las sesiones de golpe (rotación de
++  secreto; ver §2 del doc 02).
++
++### 7.4 Verificación
++
++`bun scripts/prueba-humo-fase4.ts` ejecuta logins reales contra el módulo de
++autenticación y afirma la matriz completa de atributos (producción con/sin
++`COOKIE_INSEGURA_HTTP`, desarrollo y logout) más la coherencia
++`exp − iat = 86400` del JWT emitido. Ejecútala tras cualquier cambio en esta
++área.
+diff --git a/cig-manufacturing/docs/06-REGISTRO-DECISIONES-ARQUITECTONICAS (ADR).md b/cig-manufacturing/docs/06-REGISTRO-DECISIONES-ARQUITECTONICAS (ADR).md
+index 624bd93..aa03932 100644
+--- a/cig-manufacturing/docs/06-REGISTRO-DECISIONES-ARQUITECTONICAS (ADR).md	
++++ b/cig-manufacturing/docs/06-REGISTRO-DECISIONES-ARQUITECTONICAS (ADR).md	
+@@ -370,6 +370,95 @@ Envolver las escrituras compuestas en `src/lib/reintentos.ts`:
+ 
+ ---
+ 
++## ADR-007 — Endurecimiento de la cookie de sesión: `SameSite=Strict`, `Secure` condicional y expiración de 24 h
++
++**Estado:** Aceptado · **Fecha:** v1.5.0 (Fase 4)
++
++### Contexto
++
++La autenticación vive en una única cookie (`cig_manufacturing_sesion`) que
++transporta un JWT HS256 (`jose`) y se emite/elimina desde dos funciones
++centralizadas de `src/modulos/autenticacion/servicios/auth.ts`
++(`conCookieSesion`/`sinCookieSesion`), invocadas por tres rutas que crean
++sesión (`login`, `registro`, `recuperacion/confirmar`) y una que la cierra
++(`logout`). No existe `middleware.ts` (ADR-004) ni ninguna otra cookie de
++sesión en el sistema (la única otra cookie es `sidebar_state`, de estado de
++UI emitida por el componente shadcn, sin valor de seguridad).
++
++Auditoría empírica del estado previo: `HttpOnly` ✓, `Path=/` ✓ y `Secure`
++condicional ✓ (`NODE_ENV=production` Y `COOKIE_INSEGURA_HTTP !== "1"`) ya se
++cumplían; quedaban dos huecos — `SameSite=Lax` (la cookie SÍ viajaba en
++navegación cruzada de primer nivel) y una expiración de **7 días** sin token
++de refresco (ventana de exposición de una cookie expropiada excesiva).
++
++### Decisión
++
++1. **`SameSite=Strict`** en emisión Y eliminación de la cookie. La cookie no
++   se envía en ninguna petición iniciada desde otro sitio: neutraliza el
++   CSRF en origen sin depender de tokens anti-CSRF adicionales.
++2. **`Secure` condicional intacto** (`cookieSegura()`): `true` solo con
++   `NODE_ENV=production` Y `COOKIE_INSEGURA_HTTP !== "1"`. El escape para LAN
++   sin TLS queda documentado y avisa por consola en cada arranque; nunca es
++   silencioso.
++3. **Expiración de 24 h** (`DURACION_SESION_SEG = 60 * 60 * 24`), aplicada a
++   la vez al `exp` del JWT y al `maxAge` de la cookie: caducan juntos. No se
++   introduce token de refresco: cada petición autenticada ya recarga el
++   usuario desde la BD (`obtenerSesion`), de modo que desactivar/eliminar el
++   usuario revoca la sesión al instante — la expiración es el límite de la
++   ventana de exposición de una cookie expropiada, no el mecanismo de
++   revocación.
++
++### Justificación
++
++- **`Strict` vs `Lax`**: `Lax` permite que un enlace externo (correo, chat,
++  ERP ajeno) llegue YA autenticado a la app; `Strict` exige que la primera
++   petición sea misma-sitio. Para una aplicación interna de manufactura a la
++  que se entra tecleando la URL (no siguiendo enlaces de terceros), el coste
++  de UX es marginal y la superficie CSRF queda cerrada en el propio atributo
++  (defensa en el navegador, no en código de aplicación).
++- **24 h vs 7 días**: reduce la ventana de una cookie robada de 168 h a 24 h
++  (−85,7 %). El coste (re-autenticación diaria) es aceptable en una fábrica
++  con turnos: el login es rápido y está protegido contra fuerza bruta
++  (5 fallos/IP+cuenta y 20/IP en 15 min, con `Retry-After`).
++- **Sin token de refresco**: añadirlo duplicaría la superficie (rotación,
++  revocación del refresh, almacenamiento) para ganar solo comodidad. La
++  recarga por BD en cada petición ya ofrece la revocación inmediata que un
++  refresh token suele aportar.
++- **Atributos en la eliminación**: `sinCookieSesion` usa los mismos atributos
++  que la emisión — el borrado no depende de diferencias de atributos para
++  emparejar la cookie, y la política queda declarada en un solo lugar por
++  función.
++
++### Alternativas descartadas
++
++- **Tokens anti-CSRF sincronizados**: exigirían tocar cada formulario y cada
++  ruta API; `SameSite=Strict` logra la protección CSRF en el atributo de la
++  cookie, sin estado adicional.
++- **`SameSite=None; Secure`**: sería necesario solo para casos cruzados
++  (SSO de terceros, iframes); la app no tiene ninguno.
++- **Sesión deslizante (renovar `exp` en cada petición)**: alarga
++  indefinidamente la vida de una cookie expropiada mientras el atacante la
++  use; contradice el objetivo del endurecimiento.
++- **Token de refresco de 7 días**: ver Justificación — superficie nueva sin
++  beneficio de seguridad real en esta arquitectura.
++
++### Consecuencias
++
++- Los usuarios deben iniciar sesión una vez al día (o tras 24 h de emisión
++  de la cookie). Las sesiones activas al desplegar el cambio caducan antes:
++  el `exp` de los tokens de 7 días ya emitidos sigue siendo válido hasta su
++  vencimiento, pero la cookie se re-emite con `maxAge` de 24 h en el
++  siguiente login.
++- La navegación desde un enlace externo llega como NO autenticada (el
++  usuario ve el login y entra); dentro del sitio todo funciona igual.
++- Las verificaciones E2E (Python/urllib con cookie jar) no se ven afectadas:
++  `urllib` no aplica la política SameSite, que es del navegador.
++- `scripts/prueba-humo-fase4.ts` verifica empíricamente la matriz completa
++  de atributos tras un login real (producción con/sin `COOKIE_INSEGURA_HTTP`,
++  desarrollo, logout) y la coherencia `exp − iat = 86400`.
++
++---
++
+ ## Índice de decisiones
+ 
+ | ADR | Título | Estado |
+@@ -380,3 +469,4 @@ Envolver las escrituras compuestas en `src/lib/reintentos.ts`:
+ | [ADR-004](#adr-004--guarda-de-autenticación-por-ruta-requerirpermiso-en-lugar-de-middlewarets) | Guarda de autenticación por ruta en lugar de `middleware.ts` | Aceptado |
+ | [ADR-005](#adr-005--referencias-suaves--snapshots-en-los-registros-de-auditoría-sin-fk-hacia-entidades-de-negocio) | Referencias suaves + snapshots en los registros de auditoría | Aceptado |
+ | [ADR-006](#adr-006--reintentos-con-retroceso-exponencial-para-errores-transitorios-de-la-capa-de-datos) | Reintentos con retroceso exponencial para errores transitorios | Aceptado |
++| [ADR-007](#adr-007--endurecimiento-de-la-cookie-de-sesión-samesitestrict-secure-condicional-y-expiración-de-24-h) | Endurecimiento de la cookie de sesión: `SameSite=Strict`, `Secure` condicional y expiración de 24 h | Aceptado |
+diff --git a/cig-manufacturing/scripts/prueba-humo-fase4.ts b/cig-manufacturing/scripts/prueba-humo-fase4.ts
+new file mode 100644
+index 0000000..946137c
+--- /dev/null
++++ b/cig-manufacturing/scripts/prueba-humo-fase4.ts
+@@ -0,0 +1,306 @@
++/**
++ * ============================================================================
++ * PROYECTO: CIG.MANUFACTURING
++ * PRUEBA DE HUMO — FASE 4 (hardening de sesiones y cookies, ADR-007)
++ * ============================================================================
++ * Ejercita los MANEJADORES REALES de /api/auth/login y /api/auth/logout
++ * contra la BD de desarrollo (usuario temporal creado y purgado por la
++ * propia prueba) y afirma, tras logins reales, la matriz completa de
++ * atributos de la cookie `cig_manufacturing_sesion`:
++ *
++ *   1. PRODUCCIÓN (NODE_ENV=production, AUTH_SECRET válido, SIN
++ *      COOKIE_INSEGURA_HTTP): Set-Cookie con HttpOnly, SameSite=Strict,
++ *      Path=/, Secure y Max-Age=86400 (24 h).
++ *   2. PRODUCCIÓN con COOKIE_INSEGURA_HTTP=1 (LAN sin TLS): mismos
++ *      atributos EXCEPTO Secure, que debe estar AUSENTE.
++ *   3. DESARROLLO (NODE_ENV=development): sin Secure, resto idéntico.
++ *   4. LOGOUT en producción: cookie de eliminación con Max-Age=0,
++ *      HttpOnly, SameSite=Strict, Path=/ y Secure.
++ *   5. JWT emitido (jose, HS256): exp − iat = 86400, sub = id del usuario,
++ *      y verificarTokenSesion() lo resuelve contra el secreto en vigor.
++ *   6. La verificación RECHAZA un token vencido y uno firmado con otro
++ *      secreto (la expiración y la firma se aplican de verdad).
++ *   7. Limpieza: el usuario temporal se elimina y el entorno se restaura.
++ *
++ * NOTA: la prueba fija su PROPIO AUTH_SECRET aleatorio (válido) antes de
++ * importar los módulos, de modo que el modo producción no dependa del
++ * secreto que haya en .env, y no altera ningún dato preexistente.
++ *
++ * Ejecutar: bun scripts/prueba-humo-fase4.ts
++ */
++import * as fs from "node:fs";
++import * as path from "node:path";
++import { fileURLToPath } from "node:url";
++import { SignJWT } from "jose";
++
++// ============================================================
++// CARGA EXPLÍCITA DEL .env DEL PROYECTO (antes de importar los
++// módulos bajo prueba, que leen DATABASE_URL al cargarse). La
++// resolución automática de bun puede preferir el .env de un
++// directorio superior: aquí se fija la real (patrón fase 2/3).
++// ============================================================
++function cargarEnvProyecto(): void {
++  const directorioScript = path.dirname(fileURLToPath(import.meta.url));
++  const rutaEnv = path.resolve(directorioScript, "..", ".env");
++  for (const linea of fs.readFileSync(rutaEnv, "utf8").split("\n")) {
++    const m = linea.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/);
++    if (m && m[2] !== "") process.env[m[1]] = m[2];
++  }
++}
++cargarEnvProyecto();
++
++// ============================================================
++// ENTORNO CONTROLADO: producción con secreto válido y sin escape
++// LAN, ANTES de importar los módulos bajo prueba.
++// ============================================================
++const ENTORNOOriginal = {
++  NODE_ENV: process.env.NODE_ENV,
++  AUTH_SECRET: process.env.AUTH_SECRET,
++  COOKIE_INSEGURA_HTTP: process.env.COOKIE_INSEGURA_HTTP,
++};
++// Escritura de entorno de solo runtime: NODE_ENV se declara readonly en los
++// tipos de Next, aunque Node/Bun permiten reasignarlo. Se escribe por índice.
++const envRuntime = process.env as unknown as Record<string, string | undefined>;
++function fijarEnv(clave: string, valor: string | undefined): void {
++  if (valor === undefined) delete envRuntime[clave];
++  else envRuntime[clave] = valor;
++}
++function restaurarEntorno(): void {
++  for (const [clave, valor] of Object.entries(ENTORNOOriginal)) fijarEnv(clave, valor);
++}
++// Secreto aleatorio de 64 hex chars (256 bits) — válido para producción.
++const SECRETO_PRUEBA = Array.from({ length: 32 }, () =>
++  Math.floor(Math.random() * 256)
++    .toString(16)
++    .padStart(2, "0"),
++).join("");
++fijarEnv("NODE_ENV", "production");
++fijarEnv("AUTH_SECRET", SECRETO_PRUEBA);
++fijarEnv("COOKIE_INSEGURA_HTTP", undefined);
++
++// Importación DINÁMICA: se ejecuta tras fijar el entorno.
++const { POST: iniciarSesion } = await import("../src/app/api/auth/login/route");
++const { POST: cerrarSesion } = await import("../src/app/api/auth/logout/route");
++const {
++  COOKIE_SESION,
++  hashearPassword,
++  verificarTokenSesion,
++} = await import("../src/modulos/autenticacion/servicios/auth");
++const { db } = await import("../src/lib/db");
++
++let fallas = 0;
++function afirmar(condicion: boolean, mensaje: string) {
++  console.log(`  ${condicion ? "✔" : "✗ FALLO"} — ${mensaje}`);
++  if (!condicion) fallas++;
++}
++
++const CORREO_PRUEBA = "fase4.humo@cig-manufacturing.com";
++const PASSWORD_PRUEBA = "Humo*Fase4*2026";
++const DURACION_ESPERADA_SEG = 60 * 60 * 24; // 24 h (ADR-007)
++
++interface AtributosCookie {
++  [atributo: string]: string | true;
++}
++
++/** Extrae la cookie de sesión del Set-Cookie de una respuesta real. */
++function cookieDeSesion(respuesta: Response): string | null {
++  const crudas =
++    typeof respuesta.headers.getSetCookie === "function"
++      ? respuesta.headers.getSetCookie()
++      : (respuesta.headers.get("set-cookie") ?? "").split(/,(?=[^;]+\s*=)/);
++  const conSesion = crudas.filter((c) => c.startsWith(`${COOKIE_SESION}=`));
++  return conSesion.length > 0 ? conSesion[0] : null;
++}
++
++/** Parsea una cookie Set-Cookie cruda en pares atributo→valor. */
++function parsearAtributos(cruda: string): AtributosCookie {
++  const atributos: AtributosCookie = {};
++  for (const parte of cruda.split(";").slice(1)) {
++    const limpio = parte.trim();
++    if (!limpio) continue;
++    const [nombre, ...resto] = limpio.split("=");
++    atributos[nombre.trim().toLowerCase()] = resto.length > 0 ? resto.join("=") : true;
++  }
++  return atributos;
++}
++
++/** Ejecuta un login REAL contra el manejador real de la ruta. */
++async function login(correo: string, password: string): Promise<Response> {
++  return iniciarSesion(
++    new Request("http://127.0.0.1:3000/api/auth/login", {
++      method: "POST",
++      headers: { "content-type": "application/json", "x-forwarded-for": "127.0.0.1" },
++      body: JSON.stringify({ correo, password }),
++    }),
++  );
++}
++
++/** Decodifica el payload de un JWT (solo lectura, sin verificar). */
++function decodificarJwt(token: string): { header: Record<string, unknown>; payload: Record<string, unknown> } {
++  const [h, p] = token.split(".");
++  const dec = (s: string) => JSON.parse(Buffer.from(s, "base64url").toString("utf8")) as Record<string, unknown>;
++  return { header: dec(h), payload: dec(p) };
++}
++
++/** Afirma la política de atributos común (HttpOnly, SameSite, Path, Max-Age). */
++function afirmarPoliticaComun(atributos: AtributosCookie, maxAgeEsperado: number, escenario: string): void {
++  afirmar(atributos["httponly"] === true, `${escenario}: HttpOnly presente`);
++  // RFC 6265bis: los valores de SameSite son case-insensitive; Next serializa
++  // "strict" en minúsculas (verificado empíricamente), el navegador lo trata
++  // igual que "Strict".
++  const samesite = atributos["samesite"];
++  afirmar(
++    typeof samesite === "string" && samesite.toLowerCase() === "strict",
++    `${escenario}: SameSite=Strict (serializado: ${String(samesite)})`,
++  );
++  afirmar(atributos["path"] === "/", `${escenario}: Path=/`);
++  afirmar(
++    atributos["max-age"] === String(maxAgeEsperado),
++    `${escenario}: Max-Age=${maxAgeEsperado} (obtenido: ${String(atributos["max-age"])})`,
++  );
++}
++
++async function main(): Promise<void> {
++  console.log("PRUEBA DE HUMO — FASE 4: hardening de sesiones y cookies (ADR-007)\n");
++
++  // Limpieza defensiva de ejecuciones previas interrumpidas.
++  await db.usuario.deleteMany({ where: { correo: CORREO_PRUEBA } });
++
++  const rolAdmin = await db.rol.findUnique({ where: { clave: "ADMIN" } });
++  if (!rolAdmin) throw new Error("La semilla no creó el rol ADMIN: ejecuta setup.sh primero.");
++  const usuario = await db.usuario.create({
++    data: {
++      nombre: "Humo Fase 4",
++      correo: CORREO_PRUEBA,
++      passwordHash: await hashearPassword(PASSWORD_PRUEBA),
++      rolId: rolAdmin.id,
++      activo: true,
++      debeCambiarPassword: false,
++    },
++  });
++
++  let tokenEscenarioA = "";
++  try {
++    // ---------- Escenario A: producción SIN COOKIE_INSEGURA_HTTP ----------
++    console.log("Escenario A — producción (NODE_ENV=production, sin COOKIE_INSEGURA_HTTP):");
++    const respA = await login(CORREO_PRUEBA, PASSWORD_PRUEBA);
++    afirmar(respA.status === 200, `login → 200 (obtenido: ${respA.status})`);
++    const cuerpoA = (await respA.json()) as { usuario?: { id?: string } };
++    afirmar(cuerpoA.usuario?.id === usuario.id, "el cuerpo responde con el usuario autenticado");
++    const crudaA = cookieDeSesion(respA);
++    afirmar(crudaA !== null, `Set-Cookie emite la cookie ${COOKIE_SESION}`);
++    if (crudaA) {
++      const atributos = parsearAtributos(crudaA);
++      afirmarPoliticaComun(atributos, DURACION_ESPERADA_SEG, "A");
++      afirmar(atributos["secure"] === true, "A: Secure presente (producción con HTTPS)");
++      tokenEscenarioA = crudaA.split(";")[0].slice(COOKIE_SESION.length + 1);
++    }
++
++    // ---------- JWT emitido: algoritmo, expiración y sujeto ----------
++    console.log("\nJWT emitido (jose, HS256):");
++    if (tokenEscenarioA) {
++      const { header, payload } = decodificarJwt(tokenEscenarioA);
++      afirmar(header.alg === "HS256", `alg HS256 (obtenido: ${String(header.alg)})`);
++      const exp = Number(payload.exp);
++      const iat = Number(payload.iat);
++      afirmar(
++        exp - iat === DURACION_ESPERADA_SEG,
++        `exp − iat = ${exp - iat} s (esperado ${DURACION_ESPERADA_SEG} = 24 h)`,
++      );
++      afirmar(payload.sub === usuario.id, "sub = id del usuario");
++      const verificado = await verificarTokenSesion(tokenEscenarioA);
++      afirmar(verificado === usuario.id, "verificarTokenSesion() resuelve al usuario");
++    } else {
++      afirmar(false, "sin token no se puede verificar el JWT (fallo en cadena del escenario A)");
++    }
++
++    // ---------- Escenario B: producción CON COOKIE_INSEGURA_HTTP=1 ----------
++    console.log("\nEscenario B — producción con COOKIE_INSEGURA_HTTP=1 (LAN sin TLS):");
++    fijarEnv("COOKIE_INSEGURA_HTTP", "1");
++    const respB = await login(CORREO_PRUEBA, PASSWORD_PRUEBA);
++    afirmar(respB.status === 200, `login → 200 (obtenido: ${respB.status})`);
++    const crudaB = cookieDeSesion(respB);
++    if (crudaB) {
++      const atributos = parsearAtributos(crudaB);
++      afirmarPoliticaComun(atributos, DURACION_ESPERADA_SEG, "B");
++      afirmar(!("secure" in atributos), "B: Secure AUSENTE (escape LAN sin TLS operativo)");
++    } else {
++      afirmar(false, "B: la respuesta no emitió la cookie de sesión");
++    }
++
++    // ---------- Escenario C: desarrollo ----------
++    console.log("\nEscenario C — desarrollo (NODE_ENV=development):");
++    fijarEnv("NODE_ENV", "development");
++    const respC = await login(CORREO_PRUEBA, PASSWORD_PRUEBA);
++    afirmar(respC.status === 200, `login → 200 (obtenido: ${respC.status})`);
++    const crudaC = cookieDeSesion(respC);
++    if (crudaC) {
++      const atributos = parsearAtributos(crudaC);
++      afirmarPoliticaComun(atributos, DURACION_ESPERADA_SEG, "C");
++      afirmar(!("secure" in atributos), "C: Secure ausente en desarrollo");
++    } else {
++      afirmar(false, "C: la respuesta no emitió la cookie de sesión");
++    }
++
++    // ---------- Escenario D: logout en producción ----------
++    console.log("\nEscenario D — logout en producción (cookie de eliminación):");
++    fijarEnv("NODE_ENV", "production");
++    fijarEnv("COOKIE_INSEGURA_HTTP", undefined);
++    const respD = await cerrarSesion();
++    afirmar(respD.status === 200, `logout → 200 (obtenido: ${respD.status})`);
++    const crudaD = cookieDeSesion(respD);
++    if (crudaD) {
++      const atributos = parsearAtributos(crudaD);
++      afirmar(crudaD.split(";")[0] === `${COOKIE_SESION}=`, "D: la cookie se envía vacía");
++      afirmarPoliticaComun(atributos, 0, "D");
++      afirmar(atributos["secure"] === true, "D: Secure presente (eliminación en producción)");
++    } else {
++      afirmar(false, "D: la respuesta no emitió la cookie de eliminación");
++    }
++
++    // ---------- Escenario E: la verificación aplica expiración y firma ----------
++    console.log("\nEscenario E — verificación del JWT (expiración y firma se aplican):");
++    const secreto = new TextEncoder().encode(SECRETO_PRUEBA);
++    const tokenVencido = await new SignJWT({ sub: usuario.id })
++      .setProtectedHeader({ alg: "HS256" })
++      .setIssuedAt(Math.floor(Date.now() / 1000) - 7200)
++      .setExpirationTime(Math.floor(Date.now() / 1000) - 3600)
++      .sign(secreto);
++    afirmar((await verificarTokenSesion(tokenVencido)) === null, "un token VENCIDO no verifica (null)");
++
++    const secretoAjeno = new TextEncoder().encode(`${SECRETO_PRUEBA}-ajeno`);
++    const tokenAjeno = await new SignJWT({ sub: usuario.id })
++      .setProtectedHeader({ alg: "HS256" })
++      .setIssuedAt()
++      .setExpirationTime("1h")
++      .sign(secretoAjeno);
++    afirmar((await verificarTokenSesion(tokenAjeno)) === null, "un token firmado con OTRO secreto no verifica (null)");
++  } finally {
++    // ---------- Limpieza ----------
++    await db.usuario.deleteMany({ where: { correo: CORREO_PRUEBA } });
++    const restos = await db.usuario.count({ where: { correo: CORREO_PRUEBA } });
++    afirmar(restos === 0, `usuario temporal purgado (quedan ${restos})`);
++    restaurarEntorno();
++    console.log("\n  ✔ — entorno restaurado (NODE_ENV/AUTH_SECRET/COOKIE_INSEGURA_HTTP)");
++    await db.$disconnect();
++  }
++
++  console.log(
++    fallas
++      ? `\n✗ PRUEBA DE HUMO FALLIDA (${fallas} afirmaciones)`
++      : `\n✔ PRUEBA DE HUMO COMPLETA: cookie de sesión con HttpOnly + SameSite=Strict + Path=/ + Secure condicional y JWT de 24 h verificados tras logins reales`,
++  );
++  process.exitCode = fallas ? 1 : 0;
++}
++
++main().catch(async (e) => {
++  console.error("ERROR:", e);
++  try {
++    await db.usuario.deleteMany({ where: { correo: CORREO_PRUEBA } });
++    await db.$disconnect();
++  } catch {
++    /* mejor esfuerzo */
++  }
++  restaurarEntorno();
++  process.exitCode = 1;
++});
+diff --git a/cig-manufacturing/src/modulos/autenticacion/servicios/auth.ts b/cig-manufacturing/src/modulos/autenticacion/servicios/auth.ts
+index 9b10886..07600a4 100644
+--- a/cig-manufacturing/src/modulos/autenticacion/servicios/auth.ts
++++ b/cig-manufacturing/src/modulos/autenticacion/servicios/auth.ts
+@@ -12,6 +12,11 @@
+  * MÓDULO: AUTENTICACIÓN — Servicios de servidor
+  * Hash de contraseñas (bcrypt), sesiones JWT (jose) en cookie httpOnly
+  * y guardas de permisos para las rutas API.
++ *
++ * Política de cookie de sesión (Fase 4 — ADR-007): SIEMPRE `HttpOnly`,
++ * `SameSite=Strict` y `Path=/`; `Secure` únicamente cuando
++ * `NODE_ENV=production` Y `COOKIE_INSEGURA_HTTP !== "1"` (escape
++ * documentado para LAN sin TLS). Expiración: 24 h (JWT y maxAge).
+  */
+ import { SignJWT, jwtVerify } from "jose";
+ import bcrypt from "bcryptjs";
+@@ -21,7 +26,16 @@ import type { UsuarioSesion } from "../tipos";
+ import { obtenerSecretoFirmado, esProduccion } from "./seguridad";
+ 
+ export const COOKIE_SESION = "cig_manufacturing_sesion";
+-const DURACION_SESION_SEG = 60 * 60 * 24 * 7; // 7 días
++
++/**
++ * Duración de la sesión: 24 horas (Fase 4 — ADR-007). El mismo valor fija
++ * la expiración del JWT (`exp`) y el `maxAge` de la cookie, de modo que
++ * cookie y token caducan a la vez. No existe token de refresco: cada
++ * petición autenticada recarga el usuario desde la BD (revocación efectiva),
++ * por lo que la expiración es solo el límite de la ventana de exposición
++ * de una cookie expropiada.
++ */
++const DURACION_SESION_SEG = 60 * 60 * 24; // 24 horas
+ 
+ // El secreto se resuelve y valida de forma PEREZOSA (al primer uso) y se
+ // memoriza. La validación de arranque vive en src/instrumentation.ts; esta
+@@ -185,7 +199,7 @@ function cookieSegura(): boolean {
+ export function conCookieSesion(respuesta: NextResponse, token: string): NextResponse {
+   respuesta.cookies.set(COOKIE_SESION, token, {
+     httpOnly: true,
+-    sameSite: "lax",
++    sameSite: "strict",
+     secure: cookieSegura(),
+     path: "/",
+     maxAge: DURACION_SESION_SEG,
+@@ -193,10 +207,11 @@ export function conCookieSesion(respuesta: NextResponse, token: string): NextRes
+   return respuesta;
+ }
+ 
+-/** Elimina la cookie de sesión */
++/** Elimina la cookie de sesión (maxAge 0; mismos atributos que la emisión) */
+ export function sinCookieSesion(respuesta: NextResponse): NextResponse {
+   respuesta.cookies.set(COOKIE_SESION, "", {
+     httpOnly: true,
++    sameSite: "strict",
+     secure: cookieSegura(),
+     path: "/",
+     maxAge: 0,
