@@ -49,7 +49,7 @@ paso "1/5 · Configurando variables de entorno"
 if [ ! -f .env ]; then
   CLAVE="$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
   cat > .env <<EOF
-DATABASE_URL=file:${PROYECTO_DIR}/db/custom.db
+DATABASE_URL=file:${PROYECTO_DIR}/db/custom.db?connection_limit=1
 AUTH_SECRET=${CLAVE}
 EOF
   chmod 600 .env
