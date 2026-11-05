@@ -51,8 +51,11 @@ grep -nE 'ignoreDuringBuilds[[:space:]]*:[[:space:]]*true' next.config.ts \
 echo "  ✔ ignoreBuildErrors e ignoreDuringBuilds no están habilitados"
 
 paso "2/9 Guardia: sin secretos inseguros en el código"
-# La lista negra de valores prohibidos vive POR DISEÑO en seguridad.ts y
-# validar-auth-secret.sh (para RECHAZARLOS); se excluyen de la búsqueda.
+# La lista negra de valores prohibidos vive POR DISEÑO en seguridad.ts,
+# validar-auth-secret.sh y deploy.sh (para RECHAZARLOS); se excluyen de
+# la búsqueda. docs/ también se excluye: la documentación cita esos
+# valores como ejemplos de la lista negra (documenta el bloqueo, no usa
+# el secreto). La guardia vigila código.
 # Aquí se detectan PATRONES DE USO inseguros:
 #   1) fallback con literal: AUTH_SECRET ?? "..." / || "..."
 #   2) fallback en orquestación: ${AUTH_SECRET:-...}
@@ -66,12 +69,12 @@ if grep -n 'AUTH_SECRET.*:-' docker-compose.yml Dockerfile; then
   fallo "docker-compose.yml / Dockerfile definen un fallback de AUTH_SECRET (no permitido)"
 fi
 if grep -rn --exclude='simulacion-ci.sh' --exclude='ci.yml' \
-  --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=db \
+  --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=db --exclude-dir=docs \
   -e 'Admin\*2024' -e 'Ti\*2024' . 2>/dev/null; then
   fallo "Queda una credencial fija publicada en el repositorio (patrones Admin/Ti del 2024)"
 fi
-if grep -rn --exclude='seguridad.ts' --exclude='validar-auth-secret.sh' --exclude='simulacion-ci.sh' --exclude='ci.yml' \
-  --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=db --exclude-dir=.git \
+if grep -rn --exclude='seguridad.ts' --exclude='validar-auth-secret.sh' --exclude='deploy.sh' --exclude='simulacion-ci.sh' --exclude='ci.yml' \
+  --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=db --exclude-dir=.git --exclude-dir=docs \
   -e 'cig-manufacturing-secreto-desarrollo' -e 'fabriflow-secreto-desarrollo' . 2>/dev/null; then
   fallo "Un secreto de desarrollo histórico se usa como valor (ver líneas de arriba)"
 fi
