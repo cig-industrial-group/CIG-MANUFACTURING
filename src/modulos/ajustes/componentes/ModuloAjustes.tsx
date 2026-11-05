@@ -18,6 +18,8 @@
  * Cuando una opción está desactivada, la operación únicamente puede
  * realizarla un rol con privilegios (p. ej. TI o Administrador) desde
  * el módulo de Usuarios.
+ *
+ * Sección «branding»: Identidad Visual (logo y favicon personalizados).
  */
 import { useEffect, useState } from "react";
 import {
@@ -35,6 +37,7 @@ import {
   EncabezadoSeccion,
 } from "@/modulos/compartidos/ui";
 import { useAjustes, useGuardarAjustes } from "../servicios/consultas";
+import { SeccionBranding } from "./SeccionBranding";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -135,9 +138,20 @@ function TarjetaAjuste({
 }
 
 // ============================================================
-// VISTA PRINCIPAL: AJUSTES
+// VISTA PRINCIPAL: AJUSTES (enrutable por sección)
 // ============================================================
-export function ModuloAjustes() {
+export function ModuloAjustes({ seccionId = "seguridad" }: { seccionId?: string }) {
+  // Sección «Identidad Visual»: logo y favicon personalizados
+  if (seccionId === "branding") {
+    return <SeccionBranding />;
+  }
+  return <SeccionSeguridad />;
+}
+
+// ============================================================
+// SECCIÓN: SEGURIDAD Y ACCESO (contenido histórico del módulo)
+// ============================================================
+function SeccionSeguridad() {
   const { t, idioma } = useIdioma();
   const { toast } = useToast();
   const { data, isLoading } = useAjustes();

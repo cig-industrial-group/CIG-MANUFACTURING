@@ -37,6 +37,11 @@ export const PERMISOS = [
   "oqc.gestionar",
   "usuarios.gestionar",
   "ajustes.gestionar",
+  // ===== Branding (identidad visual) =====
+  // Subida y gestión del logo y favicon del sistema (módulo Ajustes,
+  // sección «Identidad Visual"). Los archivos viven en branding/, fuera
+  // de public/, y se sirven vía /api/branding/{logo,favicon}.
+  "ajustes.branding",
   // ===== Respaldo (administración) =====
   // Respaldo completo y restauración EN CALIENTE de la base de datos
   // con rollback transaccional y ventana de reversión de 24 h.
@@ -96,6 +101,7 @@ export const PERMISOS_AGRUPADOS: Array<{
     permisos: [
       { clave: "usuarios.gestionar", es: "Gestionar usuarios y roles", en: "Manage users and roles" },
       { clave: "ajustes.gestionar", es: "Gestionar ajustes del sistema", en: "Manage system settings" },
+      { clave: "ajustes.branding", es: "Gestionar la identidad visual del sistema (logo y favicon)", en: "Manage the system's visual identity (logo and favicon)" },
       { clave: "respaldo.gestionar", es: "Respaldar, restaurar y revertir la base de datos", en: "Back up, restore and roll back the database" },
       { clave: "papelera.ver", es: "Consultar la papelera y la bitácora de eliminaciones", en: "View the recycle bin and deletion log" },
       { clave: "papelera.gestionar", es: "Restaurar o purgar definitivamente registros de la papelera", en: "Restore or permanently purge records from the recycle bin" },
