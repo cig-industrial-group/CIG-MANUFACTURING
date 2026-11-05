@@ -105,12 +105,19 @@ function Carousel({
 
   React.useEffect(() => {
     if (!api) return
-    onSelect(api)
+    // Lectura inicial diferida un frame: llamar a onSelect aquí arriba
+    // ejecutaría setState sincrónicamente dentro del efecto
+    // (regla react-hooks/set-state-in-effect, promovida a error por
+    // eslint-config-next 16.4.5). Los cambios posteriores llegan por
+    // los eventos "select"/"reInit" de embla.
+    const idLectura = window.requestAnimationFrame(() => onSelect(api))
     api.on("reInit", onSelect)
     api.on("select", onSelect)
 
     return () => {
-      api?.off("select", onSelect)
+      window.cancelAnimationFrame(idLectura)
+      api.off("reInit", onSelect)
+      api.off("select", onSelect)
     }
   }, [api, onSelect])
 

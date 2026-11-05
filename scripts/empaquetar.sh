@@ -7,7 +7,7 @@
 # CONTACTO: caballeroemanuel966@gmail.com
 # ============================================================================
 
-# Empaqueta el código fuente de CIG-MANUFACTURING v1.1.0 en download/
+# Empaqueta el código fuente de CIG-MANUFACTURING v1.1.1 en download/
 # (zip + tar.gz, estructura cig-manufacturing/, sin dependencias ni bases de datos)
 set -e
 cd /home/z/my-project

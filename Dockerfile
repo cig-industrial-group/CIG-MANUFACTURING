@@ -14,6 +14,9 @@
 #   · Proceso sin privilegios (usuario `bun` de la imagen base).
 #   · Sin secretos horneados: AUTH_SECRET se exige en el arranque
 #     (docker-entrypoint.sh) y se valida antes de tocar nada.
+#   · AUDITORÍA DE CADENA DE SUMINISTRO (Fase 5 — ADR-008): el build se
+#     DETIENE si `bun audit --audit-level=high` halla vulnerabilidades
+#     Alta o Crítica en el árbol de dependencias recién instalado.
 #   · devDependencies se eliminan tras la compilación.
 #   · HEALTHCHECK sobre GET /api.
 # ============================================================
@@ -24,6 +27,17 @@ WORKDIR /app
 # 1) Dependencias (capa cacheable; lockfile congelado)
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
+
+# 1.5) Auditoría de cadena de suministro (Fase 5 — ADR-008)
+#      Corre sobre el árbol recién instalado (mismo lockfile congelado
+#      que usará el build) y ANTES de compilar: fail-fast, y la capa
+#      se cachea junto a la de dependencias (solo se re-audita cuando
+#      cambian package.json o bun.lock).
+#      `bun audit` no tiene bandera `--severity`: su equivalente nativo
+#      es `--audit-level` (low|moderate|high|critical), idéntico en
+#      semántica a `npm audit --audit-level`. Sale con código 1 si hay
+#      avisos >= high, lo que DETIENE el build de la imagen.
+RUN bun audit --audit-level=high
 
 # 2) Código fuente
 COPY . .

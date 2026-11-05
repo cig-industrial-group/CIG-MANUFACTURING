@@ -1,6 +1,6 @@
 # 01 — Introducción y Principios
 
-> **Proyecto:** CIG-MANUFACTURING · **Versión documentada:** 1.1.0 · **Rama:** `main`
+> **Proyecto:** CIG-MANUFACTURING · **Versión documentada:** 1.1.1 · **Rama:** `main`
 > Suite de documentación arquitectónica — Parte 1 de 6.
 
 ---

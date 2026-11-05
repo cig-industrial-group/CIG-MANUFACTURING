@@ -80,21 +80,36 @@ if grep -rn --exclude='seguridad.ts' --exclude='validar-auth-secret.sh' --exclud
 fi
 echo "  ✔ Sin fallbacks de secretos ni credenciales publicadas"
 
+# Nota de dureza (v1.1.1): los pasos de calidad usan `|| fallo` para que un
+# fallo ABORTE la simulación. El patrón anterior `cmd && echo "  ✔ …"` NO
+# abortaba: bash no aplica errexit a comandos dentro de una lista &&, así
+# que un lint/build/tsc fallido pasaba sin ✔ y la simulación seguía hasta
+# el final (se descubrió con el lint de eslint-config-next 16.4.5, cuya
+# regla react-hooks/set-state-in-effect era error y la simulación la dejó
+# pasar). Cada paso es ahora una puerta real.
+
 paso "3/9 Esquema Prisma (validate + generate)"
-bunx prisma validate > /dev/null && echo "  ✔ prisma validate"
-bunx prisma generate > /dev/null && echo "  ✔ prisma generate"
+bunx prisma validate > /dev/null || fallo "prisma validate falló"
+echo "  ✔ prisma validate"
+bunx prisma generate > /dev/null || fallo "prisma generate falló"
+echo "  ✔ prisma generate"
 
 paso "4/9 Lint (ESLint)"
-bun run lint && echo "  ✔ lint sin errores"
+bun run lint || fallo "lint con errores de ESLint (corrígelos antes de entregar)"
+echo "  ✔ lint sin errores"
 
 paso "5/9 Build de producción (verificación de tipos real)"
-bun run build && echo "  ✔ build completado"
+bun run build || fallo "el build de producción falló"
+echo "  ✔ build completado"
 
 paso "6/9 Typecheck completo (tsc --noEmit)"
-./node_modules/.bin/tsc --noEmit && echo "  ✔ sin errores de tipos"
+./node_modules/.bin/tsc --noEmit || fallo "tsc --noEmit reportó errores de tipos"
+echo "  ✔ sin errores de tipos"
 
 paso "7/9 BD efímera + semilla"
-bunx prisma db push --skip-generate > /dev/null && echo "  ✔ esquema creado ($DATABASE_URL)"
+bunx prisma db push --skip-generate > /dev/null \
+  || fallo "prisma db push falló sobre la BD efímera"
+echo "  ✔ esquema creado ($DATABASE_URL)"
 ADMIN_PASSWORD="$ADMIN_PASSWORD" bun prisma/seed.ts
 
 paso "8/9 Servidor standalone (puerto $PUERTO)"
