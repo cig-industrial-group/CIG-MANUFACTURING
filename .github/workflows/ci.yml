@@ -88,8 +88,8 @@ jobs:
       # ── 2. GUARDIA DE SECRETOS ─────────────────────────────────
       # Evita que un fallback de secreto conocido vuelva al código.
       # La lista negra de valores prohibidos vive POR DISEÑO en
-      # seguridad.ts y validar-auth-secret.sh (para RECHAZARLOS);
-      # se excluyen de la búsqueda de presencia.
+      # seguridad.ts, validar-auth-secret.sh y deploy.sh (para
+      # RECHAZARLOS); se excluyen de la búsqueda de presencia.
       - name: "Guardia: sin secretos inseguros en el código"
         run: |
           PROBLEMA=0
@@ -112,7 +112,7 @@ jobs:
           fi
           # 4) Secretos de desarrollo históricos usados como valor
           #    (fuera de la lista negra declarada)
-          if grep -rn --exclude='seguridad.ts' --exclude='validar-auth-secret.sh' --exclude='simulacion-ci.sh' --exclude='ci.yml' \
+          if grep -rn --exclude='seguridad.ts' --exclude='validar-auth-secret.sh' --exclude='deploy.sh' --exclude='simulacion-ci.sh' --exclude='ci.yml' \
             --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=db --exclude-dir=.git \
             -e 'cig-manufacturing-secreto-desarrollo' -e 'fabriflow-secreto-desarrollo' . ; then
             echo "::error title=secreto inseguro::Un secreto de desarrollo histórico se usa como valor (ver arriba)."

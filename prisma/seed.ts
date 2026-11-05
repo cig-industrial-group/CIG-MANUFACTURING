@@ -18,15 +18,17 @@
  *  · Usuarios: SOLO se crean en una base de datos SIN usuarios
  *    (primera instalación). Nunca se recrean cuentas eliminadas y
  *    jamás existen contraseñas fijas publicadas:
- *      - ADMIN_PASSWORD del entorno → se valida contra la política
- *        del sistema y se usa como contraseña del administrador.
- *      - Sin ADMIN_PASSWORD → contraseña ALEATORIA (144 bits) que se
- *        escribe UNA VEZ en credenciales-iniciales.txt (permisos 0600,
- *        junto a la base de datos) y obliga a cambiarla en el primer
- *        acceso (debeCambiarPassword=true).
+ *      - INITIAL_ADMIN_PASSWORD del entorno (deploy.sh) → se valida
+ *        contra la política del sistema y se usa como contraseña del
+ *        administrador. Se mantiene ADMIN_PASSWORD como alias
+ *        retrospectivo (setup.sh / docker-entrypoint.sh).
+ *      - Sin contraseña de entorno → contraseña ALEATORIA (144 bits)
+ *        que se escribe UNA VEZ en credenciales-iniciales.txt
+ *        (permisos 0600, junto a la base de datos) y obliga a
+ *        cambiarla en el primer acceso (debeCambiarPassword=true).
  *    La contraseña NUNCA se imprime por consola.
  *
- * Uso: bun prisma/seed.ts   (ADMIN_PASSWORD=... para fijarla)
+ * Uso: bun prisma/seed.ts   (INITIAL_ADMIN_PASSWORD=... para fijarla)
  */
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
@@ -194,14 +196,16 @@ async function main() {
     const rol = await db.rol.findUnique({ where: { clave: "ADMIN" } });
     if (!rol) throw new Error("Rol no encontrado: ADMIN");
 
-    const passwordEntorno = process.env.ADMIN_PASSWORD;
+    // Orden de precedencia: INITIAL_ADMIN_PASSWORD (deploy.sh) y, como
+    // alias retrospectivo, ADMIN_PASSWORD (setup.sh / Docker).
+    const passwordEntorno = process.env.INITIAL_ADMIN_PASSWORD ?? process.env.ADMIN_PASSWORD;
     let password: string;
     let origen: "entorno" | "aleatoria";
 
     if (passwordEntorno !== undefined && passwordEntorno !== "") {
       if (!cumplePolitica(passwordEntorno)) {
         throw new Error(
-          "ADMIN_PASSWORD no cumple la política (mínimo 8 caracteres, al menos una letra y un número).",
+          "INITIAL_ADMIN_PASSWORD no cumple la política (mínimo 8 caracteres, al menos una letra y un número).",
         );
       }
       password = passwordEntorno;
@@ -224,7 +228,7 @@ async function main() {
     });
 
     if (origen === "entorno") {
-      console.log(`✔ Usuario administrador creado: ${CORREO_ADMIN} (contraseña: ADMIN_PASSWORD del entorno)`);
+      console.log(`✔ Usuario administrador creado: ${CORREO_ADMIN} (contraseña: INITIAL_ADMIN_PASSWORD del entorno)`);
     } else {
       // Contraseña aleatoria: escribir UNA VEZ junto a la BD (permisos 600).
       const archivo = path.join(path.dirname(rutaBaseDatos()), "credenciales-iniciales.txt");
