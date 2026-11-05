@@ -21,6 +21,7 @@
  * se restaura con el mismo id.
  */
 import { db } from "@/lib/db";
+import { aDecimal } from "@/lib/numerico";
 import { ErrorNegocio } from "@/modulos/almacen/servicios/nucleo";
 import { sanearEmpaqueProducto } from "@/modulos/unidades/servicios/nucleo";
 
@@ -227,9 +228,11 @@ interface DatosPapelera {
   categoria?: string;
   unidad?: string;
   unidadPaquete?: string | null;
-  contenidoPaquete?: number | null;
-  stockMinimo?: number;
-  costoUnitario?: number | null;
+  // Decimales del snapshot: texto decimal exacto (nuevos) o número (snapshots
+  // legados de la era float): se normalizan al restaurar (aDecimal)
+  contenidoPaquete?: string | number | null;
+  stockMinimo?: string | number;
+  costoUnitario?: string | number | null;
   ubicacion?: string | null;
   tipo?: string;
   responsable?: string | null;
@@ -240,7 +243,7 @@ interface DatosPapelera {
   debeCambiarPassword?: boolean;
   ultimoAcceso?: string | null;
   activo?: boolean;
-  stocks?: Array<{ almacenId?: string; productoId?: string; cantidad: number }>;
+  stocks?: Array<{ almacenId?: string; productoId?: string; cantidad: string | number }>;
   partes?: Array<{ numeroParteId: string; numero: string }>;
   modelos?: Array<{ modeloId: string; codigo: string }>;
   // Cliente
@@ -256,7 +259,7 @@ interface DatosPapelera {
  *  almacén se fija su almacenId. */
 async function recrearStockTx(
   tx: PrismaTx,
-  filas: Array<{ almacenId?: string; productoId?: string; cantidad: number }>,
+  filas: Array<{ almacenId?: string; productoId?: string; cantidad: string | number }>,
   productoFijo?: string,
   almacenFijo?: string,
 ) {
@@ -268,11 +271,13 @@ async function recrearStockTx(
     if (!almacenVivo) continue;
     const productoVivo = await tx.producto.findUnique({ where: { id: productoId } });
     if (!productoVivo) continue;
+    // Normalización Decimal del snapshot (legado numérico o texto exacto)
+    const cantidad = aDecimal(s.cantidad);
     const existente = await tx.stock.findUnique({
       where: { productoId_almacenId: { productoId, almacenId } },
     });
-    if (!existente && Math.abs(s.cantidad) > 0) {
-      await tx.stock.create({ data: { productoId, almacenId, cantidad: s.cantidad } });
+    if (!existente && cantidad?.isPositive()) {
+      await tx.stock.create({ data: { productoId, almacenId, cantidad: cantidad.toString() } });
     }
   }
 }
@@ -287,7 +292,8 @@ async function restaurarProductoTx(tx: PrismaTx, datos: DatosPapelera) {
   const unidad = datos.unidad ?? "PZA";
   const empaque = await sanearEmpaqueProducto(unidad, {
     unidadPaquete: datos.unidadPaquete ?? null,
-    contenidoPaquete: datos.contenidoPaquete ?? null,
+    // Snapshot legado (número) o texto decimal: se normaliza a texto exacto
+    contenidoPaquete: aDecimal(datos.contenidoPaquete)?.toString() ?? null,
   });
 
   await tx.producto.create({
@@ -300,8 +306,8 @@ async function restaurarProductoTx(tx: PrismaTx, datos: DatosPapelera) {
       unidad,
       unidadPaquete: empaque.unidadPaquete,
       contenidoPaquete: empaque.contenidoPaquete,
-      stockMinimo: datos.stockMinimo ?? 0,
-      costoUnitario: datos.costoUnitario ?? null,
+      stockMinimo: aDecimal(datos.stockMinimo ?? 0)?.toString() ?? "0",
+      costoUnitario: aDecimal(datos.costoUnitario)?.toString() ?? null,
       // Se restaura visible: quien lo trae de vuelta quiere verlo
       activo: true,
       createdAt: new Date(datos.createdAt),

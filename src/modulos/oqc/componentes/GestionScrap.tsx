@@ -34,7 +34,13 @@ import { ErrorApi } from "../servicios/api";
 import { claveErrorApi } from "../servicios/errores";
 import { CapturaConteo } from "@/modulos/unidades/componentes/CapturaConteo";
 import { calcularConteo } from "@/modulos/unidades/servicios/consultas";
-import { estadoConteoInicial, textoConteo, type EstadoConteo } from "@/modulos/unidades/tipos";
+import {
+  compararDecimales,
+  esDecimalPositivo,
+  estadoConteoInicial,
+  textoConteo,
+  type EstadoConteo,
+} from "@/modulos/unidades/tipos";
 import type { RegistroScrap } from "../tipos";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -136,22 +142,22 @@ export function GestionScrap() {
 
   const productoSel = productosActivos.find((p) => p.id === formulario.productoId) ?? null;
 
-  // Total del scrap nuevo según el modo de captura (directo o paquetes
-  // del EMPAQUE CONFIGURADO DEL PRODUCTO)
+  // Total del scrap según el modo de captura (directo o paquetes del
+  // EMPAQUE CONFIGURADO DEL PRODUCTO) — texto decimal exacto
   const resultadoConteo = calcularConteo(formulario.conteo, productoSel);
-  const cantidadNueva = editando ? Number(formulario.cantidad) : resultadoConteo.total;
+  const cantidadNueva = editando ? formulario.cantidad : resultadoConteo.total;
 
   const disponible = formulario.almacenId
-    ? stockPorProducto.get(formulario.productoId) ?? 0
+    ? stockPorProducto.get(formulario.productoId) ?? "0"
     : null;
-  const excede = disponible !== null && cantidadNueva > disponible && !editando;
+  // Comparación EXACTA de textos decimales (guarda de UX; el servidor revalida)
+  const excede = disponible !== null && compararDecimales(cantidadNueva, disponible) > 0 && !editando;
 
   async function guardar() {
     if (
       !formulario.productoId ||
       !formulario.almacenId ||
-      !Number.isFinite(cantidadNueva) ||
-      cantidadNueva <= 0
+      !esDecimalPositivo(cantidadNueva)
     ) {
       setError(t("comun.camposIncompletos"));
       return;
@@ -188,8 +194,8 @@ export function GestionScrap() {
             resultadoConteo.partes && {
               conteo: {
                 unidad: formulario.conteo.unidad,
-                paquetes: Number(formulario.conteo.paquetes) || 0,
-                sueltas: Number(formulario.conteo.sueltas) || 0,
+                paquetes: formulario.conteo.paquetes || 0,
+                sueltas: formulario.conteo.sueltas || 0,
               },
             }),
         });

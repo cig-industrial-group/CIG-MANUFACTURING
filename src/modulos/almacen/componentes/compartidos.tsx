@@ -16,6 +16,7 @@
  */
 import { useIdioma } from "@/modulos/compartidos/idioma";
 import { SelectorBuscador } from "@/modulos/compartidos/ui";
+import { formatearNumeroConteo } from "@/modulos/unidades/tipos";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import {
@@ -137,7 +138,8 @@ export function SelectorProducto({
   productos: Producto[];
   valor: string | null;
   onChange: (id: string) => void;
-  stockPorAlmacen?: Map<string, number>; // productoId -> stock (cuando se filtra por almacén)
+  /** productoId → stock en texto decimal exacto (cuando se filtra por almacén) */
+  stockPorAlmacen?: Map<string, string | number>;
 }) {
   const { t } = useIdioma();
   return (
@@ -146,7 +148,7 @@ export function SelectorProducto({
         valor: p.id,
         etiqueta: `${p.sku} — ${p.nombre}`,
         subetiqueta: stockPorAlmacen
-          ? `${t("comun.disponible")}: ${stockPorAlmacen.get(p.id) ?? 0} ${p.unidad}`
+          ? `${t("comun.disponible")}: ${formatearNumeroConteo(stockPorAlmacen.get(p.id) ?? 0)} ${p.unidad}`
           : `${t("producto.stockTotal")}: ${p.stockTotal} ${p.unidad}`,
       }))}
       valor={valor}
@@ -199,12 +201,16 @@ export function IndicadorStock({
   stock,
   minimo,
 }: {
-  stock: number;
-  minimo: number;
+  /** Existencia (texto decimal exacto; se acepta number por compatibilidad) */
+  stock: string | number;
+  /** Mínimo configurado (texto decimal exacto) */
+  minimo: string | number;
 }) {
   const { t } = useIdioma();
-  if (minimo <= 0) return null;
-  const ratio = stock / minimo;
+  // Indicador de PRESENTACIÓN: comparación numérica; el dominio y el
+  // servidor trabajan siempre con decimales exactos (texto).
+  if (Number(minimo) <= 0) return null;
+  const ratio = Number(stock) / Number(minimo);
   if (ratio < 0.5) {
     return (
       <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-700 dark:text-red-400">

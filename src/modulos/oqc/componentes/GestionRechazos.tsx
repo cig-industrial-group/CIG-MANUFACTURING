@@ -39,6 +39,7 @@ import {
 } from "../servicios/consultas";
 import { ErrorApi } from "../servicios/api";
 import { claveErrorApi } from "../servicios/errores";
+import { aTextoDecimal, esDecimalPositivo } from "@/modulos/unidades/tipos";
 import type { DisposicionRechazo, RegistroRechazo } from "../tipos";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -139,8 +140,14 @@ export function GestionRechazos() {
   }
 
   async function guardar() {
-    const cantidad = Number(formulario.cantidad);
-    if (!formulario.productoId || !Number.isFinite(cantidad) || cantidad <= 0 || !formulario.motivo.trim()) {
+    // Validación decimal exacta del lado cliente (el servidor revalida)
+    const cantidad = aTextoDecimal(formulario.cantidad);
+    if (
+      !formulario.productoId ||
+      cantidad === null ||
+      !esDecimalPositivo(cantidad) ||
+      !formulario.motivo.trim()
+    ) {
       setError(t("comun.camposIncompletos"));
       return;
     }

@@ -10,6 +10,7 @@
 
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { CERO, type Decimal, desdeBD, multiplicar } from "@/lib/numerico";
 import { requerirPermiso } from "@/modulos/autenticacion/servicios/auth";
 
 // GET /api/almacen/almacenes — Listar almacenes con agregados de stock
@@ -33,15 +34,24 @@ export async function GET(request: Request) {
     },
   });
 
-  const unidadesPorAlmacen = new Map<string, number>();
-  const valorPorAlmacen = new Map<string, number>();
+  // Agregación Decimal EXACTA en la capa de aplicación (el SQL SUM sobre
+  // texto decimal no es exacto; prohibido float en agregados de inventario)
+  const unidadesPorAlmacen = new Map<string, Decimal>();
+  const valorPorAlmacen = new Map<string, Decimal>();
   const productosPorAlmacen = new Map<string, number>();
   for (const s of stocks) {
-    if (s.cantidad <= 0) continue;
-    unidadesPorAlmacen.set(s.almacenId, (unidadesPorAlmacen.get(s.almacenId) ?? 0) + s.cantidad);
+    const cantidad = desdeBD(s.cantidad, "Stock.cantidad");
+    if (!cantidad.isPositive()) continue;
+    unidadesPorAlmacen.set(
+      s.almacenId,
+      (unidadesPorAlmacen.get(s.almacenId) ?? CERO).plus(cantidad),
+    );
+    const costo = s.producto.costoUnitario
+      ? desdeBD(s.producto.costoUnitario, "Producto.costoUnitario")
+      : CERO;
     valorPorAlmacen.set(
       s.almacenId,
-      (valorPorAlmacen.get(s.almacenId) ?? 0) + s.cantidad * (s.producto.costoUnitario ?? 0),
+      (valorPorAlmacen.get(s.almacenId) ?? CERO).plus(multiplicar(cantidad, costo)),
     );
     productosPorAlmacen.set(s.almacenId, (productosPorAlmacen.get(s.almacenId) ?? 0) + 1);
   }
@@ -51,8 +61,8 @@ export async function GET(request: Request) {
       ...a,
       createdAt: a.createdAt.toISOString(),
       numProductos: productosPorAlmacen.get(a.id) ?? 0,
-      totalUnidades: unidadesPorAlmacen.get(a.id) ?? 0,
-      valorInventario: valorPorAlmacen.get(a.id) ?? 0,
+      totalUnidades: (unidadesPorAlmacen.get(a.id) ?? CERO).toString(),
+      valorInventario: (valorPorAlmacen.get(a.id) ?? CERO).toString(),
     })),
   );
 }

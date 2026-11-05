@@ -121,16 +121,17 @@ con `false`/`false`/`"OPERADOR"`.
 | `categoria` | String | `MATERIA_PRIMA` por omisión · `PRODUCTO_TERMINADO` · `MATERIAL` · `INSUMO` |
 | `unidad` | String | código de la unidad BASE del catálogo (`PZA`, `KG`, `M`, `L`…) |
 | `unidadPaquete` | String? | código de la unidad de paquete (`PAQ`, `CJA`…) para conteo |
-| `contenidoPaquete` | Float? | unidades base por paquete (varía POR PRODUCTO; el stock siempre vive en la unidad base) |
-| `stockMinimo` | Float | `0` por omisión (alertas) |
-| `costoUnitario` | Float? | valorización |
+| `contenidoPaquete` | String? | unidades base por paquete, **texto decimal exacto** ("10", "2.5"; varía POR PRODUCTO; el stock siempre vive en la unidad base) |
+| `stockMinimo` | String | `"0"` por omisión (alertas); **texto decimal exacto** |
+| `costoUnitario` | String? | valorización; **texto decimal exacto** (nunca float) |
 | `activo` | Boolean | `true` por omisión |
 | `createdAt` / `updatedAt` | DateTime | automáticos |
 
 ### 2.3 `Stock`
 
 Existencias por combinación producto × almacén. Campos: `id`, `productoId`, `almacenId`
-(FK duras con cascade), `cantidad Float` (0 por omisión), `updatedAt`. Restricción
+(FK duras con cascade), `cantidad String` (texto decimal exacto; `"0"` por omisión),
+`updatedAt`. Restricción
 `@@unique([productoId, almacenId])` (una fila por combinación) e índice en `almacenId`.
 
 ### 2.4 `Movimiento` — registro inmutable tipo ledger
@@ -145,8 +146,8 @@ El corazón del sistema. **No se actualiza ni se borra**: las correcciones crean
 | `tipo` | String | `ENTRADA` · `RECEPCION` · `SALIDA` · `TRASLADO` · `AJUSTE` · `SCRAP` |
 | `productoId` | String | referencia suave (sin FK) |
 | `almacenOrigenId` / `almacenDestinoId` | String? | referencias suaves |
-| `cantidad` | Float | **siempre en la unidad base del producto** |
-| `cantidadDespues` | Float? | snapshot del stock resultante |
+| `cantidad` | String | **siempre en la unidad base del producto**; texto decimal exacto (máx. 6 decimales) |
+| `cantidadDespues` | String? | snapshot del stock resultante (texto decimal exacto) |
 | `motivo` / `referencia` / `responsable` | String? | causa; factura/OC/remisión; quien firma |
 | `usuarioId` | String? | referencia suave |
 | `usuarioNombre` | String? | snapshot del usuario que registró |
@@ -267,7 +268,7 @@ Scrap: material desechado tras inspección; **descuenta stock** mediante un `Mov
 tipo `SCRAP` (mismo folio, referencia suave en `movimientoId`). Campos: `id`; `folio`
 **único** `SCR-20261103-0001`; `productoId` + snapshots `productoSku`/`productoNombre`/
 `productoUnidad`; `almacenId` + snapshots `almacenCodigo`/`almacenNombre`; `cantidad
-Float`; `motivo` (defecto, daño, no conforme…); `notas?`; `responsable?`; `usuarioId?`/
+String` (texto decimal exacto); `motivo` (defecto, daño, no conforme…); `notas?`; `responsable?`; `usuarioId?`/
 `usuarioNombre?`; `movimientoId?`; `conteoDetalle?` (snapshot del conteo en paquetes);
 `createdAt`/`updatedAt`. Índices: `createdAt`, `productoId`. Corregible/eliminable con
 bitácora como cualquier movimiento.
@@ -277,7 +278,7 @@ bitácora como cualquier movimiento.
 Rechazo de inspección: **documental, no toca stock**. Campos: `id`; `folio` **único**
 `RECH-20261103-0001`; `productoId` + snapshots; `clienteId`/`clienteCodigo`/
 `clienteNombre?` (destino previsto); `salidaId?`/`salidaFolio?` (salida de origen);
-`cantidad Float`; `motivo`; `disposicion` (`PENDIENTE` por omisión · `RETRABAJO` ·
+`cantidad String` (texto decimal exacto); `motivo`; `disposicion` (`PENDIENTE` por omisión · `RETRABAJO` ·
 `SCRAP` · `LIBERADO`); `notas?`; `responsable?`; `usuarioId?`/`usuarioNombre?`;
 `createdAt`/`updatedAt`. Índices: `createdAt`, `productoId`, `clienteId`, `salidaId`.
 Editable/eliminable directo (no es ledger).

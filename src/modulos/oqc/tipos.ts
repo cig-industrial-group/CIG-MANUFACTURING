@@ -48,12 +48,14 @@ export interface SalidaOQC {
   partidas: PartidaSalida[];
   /** Agregados calculados a partir de las partidas vivas */
   totalPartidas: number;
-  totalUnidades: number;
+  /** Suma Decimal exacta de |cantidad| de las partidas (texto decimal) */
+  totalUnidades: string;
 }
 
 export interface LineaSalida {
   productoId: string;
-  cantidad: number;
+  /** Texto decimal exacto en unidad base */
+  cantidad: string;
   /** Conteo en paquetes (opcional): el servidor calcula el total en unidad base */
   conteo?: CapturaConteoCuerpo;
 }
@@ -74,7 +76,8 @@ export interface RespuestaLiberacion {
 export interface CuerpoEdicionPartida {
   productoId: string;
   almacenOrigenId?: string;
-  cantidad: number;
+  /** Texto decimal exacto en unidad base */
+  cantidad: string;
   motivo?: string;
   motivoCorreccion: string;
   // NOTA: la remisión (referencia / PL) y el responsable de una partida NO
@@ -107,7 +110,8 @@ export interface RegistroScrap {
   almacenId: string | null;
   almacenCodigo: string | null;
   almacenNombre: string | null;
-  cantidad: number;
+  /** Cantidad en unidad base (texto decimal exacto) */
+  cantidad: string;
   motivo: string;
   notas: string | null;
   responsable: string | null;
@@ -123,7 +127,8 @@ export interface RegistroScrap {
 export interface CuerpoRegistroScrap {
   productoId: string;
   almacenId: string;
-  cantidad: number;
+  /** Texto decimal exacto en unidad base */
+  cantidad: string;
   motivo: string;
   notas?: string;
   responsable?: string;
@@ -134,7 +139,8 @@ export interface CuerpoRegistroScrap {
 export interface CuerpoEdicionScrap {
   productoId?: string;
   almacenId?: string;
-  cantidad?: number;
+  /** Texto decimal exacto en unidad base */
+  cantidad?: string;
   motivo?: string;
   notas?: string;
   responsable?: string;
@@ -159,7 +165,8 @@ export interface RegistroRechazo {
   clienteNombre: string | null;
   salidaId: string | null;
   salidaFolio: string | null;
-  cantidad: number;
+  /** Cantidad (texto decimal exacto; documental) */
+  cantidad: string;
   motivo: string;
   disposicion: DisposicionRechazo;
   notas: string | null;
@@ -174,7 +181,8 @@ export interface CuerpoRegistroRechazo {
   productoId: string;
   clienteId?: string;
   salidaId?: string;
-  cantidad: number;
+  /** Texto decimal exacto */
+  cantidad: string;
   motivo: string;
   disposicion?: DisposicionRechazo;
   notas?: string;
@@ -184,7 +192,8 @@ export interface CuerpoRegistroRechazo {
 export interface CuerpoEdicionRechazo {
   productoId?: string;
   clienteId?: string | null;
-  cantidad?: number;
+  /** Texto decimal exacto */
+  cantidad?: string;
   motivo?: string;
   disposicion?: DisposicionRechazo;
   notas?: string;

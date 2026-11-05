@@ -45,7 +45,7 @@ import { claveErrorApi } from "../servicios/errores";
 import { InsigniaCategoria, IndicadorStock } from "./compartidos";
 import { DialogoEtiquetaQr, EtiquetaQrProducto } from "./qr-etiqueta";
 import type { CuerpoProducto, Producto } from "../tipos";
-import { formatearNumeroConteo } from "@/modulos/unidades/tipos";
+import { esDecimalPositivo, formatearNumeroConteo } from "@/modulos/unidades/tipos";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -76,7 +76,7 @@ const VACIO: CuerpoProducto = {
   unidad: "PZA",
   unidadPaquete: null,
   contenidoPaquete: null,
-  stockMinimo: 0,
+  stockMinimo: "0",
   costoUnitario: null,
 };
 
@@ -547,7 +547,7 @@ export function GestionProductos() {
                   step="any"
                   value={formulario.stockMinimo}
                   onChange={(e) =>
-                    setFormulario({ ...formulario, stockMinimo: Number(e.target.value) || 0 })
+                    setFormulario({ ...formulario, stockMinimo: e.target.value || "0" })
                   }
                 />
               </div>
@@ -562,7 +562,7 @@ export function GestionProductos() {
                   onChange={(e) =>
                     setFormulario({
                       ...formulario,
-                      costoUnitario: e.target.value === "" ? null : Number(e.target.value),
+                      costoUnitario: e.target.value === "" ? null : e.target.value,
                     })
                   }
                   placeholder="0.00"
@@ -596,9 +596,9 @@ export function GestionProductos() {
                         contenidoPaquete:
                           v === "NINGUNA"
                             ? null
-                            : prev.contenidoPaquete && prev.contenidoPaquete > 0
+                            : prev.contenidoPaquete && esDecimalPositivo(prev.contenidoPaquete)
                               ? prev.contenidoPaquete
-                              : 10,
+                              : "10",
                       }))
                     }
                   >
@@ -632,7 +632,7 @@ export function GestionProductos() {
                     onChange={(e) =>
                       setFormulario({
                         ...formulario,
-                        contenidoPaquete: e.target.value === "" ? null : Number(e.target.value),
+                        contenidoPaquete: e.target.value === "" ? null : e.target.value,
                       })
                     }
                     placeholder="10"
@@ -640,9 +640,9 @@ export function GestionProductos() {
                   <p className="text-[11px] text-muted-foreground">{t("producto.contenidoAyuda")}</p>
                 </div>
               </div>
-              {empaqueVigenteValido && formulario.unidadPaquete && Number(formulario.contenidoPaquete) > 0 && (
+              {empaqueVigenteValido && formulario.unidadPaquete && esDecimalPositivo(formulario.contenidoPaquete) && (
                 <p className="rounded-md bg-muted/60 px-3 py-2 text-sm tabular-nums">
-                  1 {formulario.unidadPaquete} = {formatearNumeroConteo(Number(formulario.contenidoPaquete))}{" "}
+                  1 {formulario.unidadPaquete} = {formatearNumeroConteo(formulario.contenidoPaquete ?? "0")}{" "}
                   {formulario.unidad}
                 </p>
               )}

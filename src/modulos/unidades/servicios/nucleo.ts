@@ -34,14 +34,15 @@
  * unidades estándar de fábrica listas para ajustarse.
  */
 import { db } from "@/lib/db";
+import { CERO, type Decimal, aDecimal, desdeBD } from "@/lib/numerico";
 import { ErrorNegocio } from "@/modulos/almacen/servicios/nucleo";
 import type { ParteConteo, TipoUnidad, Unidad, CuerpoUnidad } from "../tipos";
 import { TIPOS_UNIDAD, TIPOS_UNIDAD_BASE } from "../tipos";
 
 type PrismaTx = Parameters<Parameters<typeof db.$transaction>[0]>[0];
 
-/** Tolerancia para comparaciones de punto flotante */
-const EPSILON = 1e-9;
+/** Aritmética EXACTA (Decimal): el EPSILON de la era float desaparece
+ *  porque las comparaciones de conteo ya no arrastran ruido binario. */
 
 /** Código corto en mayúsculas: letra inicial, hasta 12 caracteres */
 const PATRON_CODIGO = /^[A-Z][A-Z0-9._-]{0,11}$/;
@@ -327,8 +328,8 @@ export async function eliminarUnidad(id: string): Promise<{ codigo: string }> {
 export interface EmpaqueProducto {
   /** código de la unidad de paquete del catálogo (PAQ, CJA...); null = sin empaque */
   unidadPaquete: string | null;
-  /** unidades base que contiene cada paquete (p. ej. 10 PZ por PAQ) */
-  contenidoPaquete: number | null;
+  /** unidades base que contiene cada paquete ("10"; decimal exacto) */
+  contenidoPaquete: string | null;
 }
 
 /**
@@ -359,12 +360,12 @@ export async function validarEmpaqueProducto(
     throw new ErrorNegocio("PAQUETE_INCOMPATIBLE", 400);
   }
 
-  const contenido = Number(crudo.contenidoPaquete);
-  if (!Number.isFinite(contenido) || contenido <= EPSILON) {
+  const contenido = aDecimal(crudo.contenidoPaquete);
+  if (!contenido || !contenido.isPositive()) {
     throw new ErrorNegocio("PAQUETE_CONTENIDO_INVALIDO", 400);
   }
 
-  return { unidadPaquete: unidad.codigo, contenidoPaquete: contenido };
+  return { unidadPaquete: unidad.codigo, contenidoPaquete: contenido.toString() };
 }
 
 /**
@@ -396,10 +397,10 @@ export async function sanearEmpaqueProducto(
 export interface CapturaConteo {
   /** código de la unidad de conteo (la del empaque del producto) */
   unidad: string;
-  /** paquetes completos */
-  paquetes?: number;
-  /** unidades sueltas de la base (piezas fuera de paquete) */
-  sueltas?: number;
+  /** paquetes completos (entero; se acepta texto de clientes legados) */
+  paquetes?: number | string;
+  /** unidades sueltas de la base (piezas fuera de paquete; decimal exacto) */
+  sueltas?: number | string;
 }
 
 /**
@@ -421,16 +422,16 @@ export async function resolverConteoTx(
   producto: {
     unidad: string;
     unidadPaquete: string | null;
-    contenidoPaquete: number | null;
+    contenidoPaquete: string | null;
   },
   captura: CapturaConteo | null | undefined,
-): Promise<{ cantidad: number; partes: ParteConteo[] } | null> {
+): Promise<{ cantidad: Decimal; partes: ParteConteo[] } | null> {
   if (!captura || !captura.unidad) return null;
 
   const codigoCaptura = normalizarCodigo(captura.unidad);
-  const paquetes = Number(captura.paquetes ?? 0);
-  const sueltas = Number(captura.sueltas ?? 0);
-  if (!Number.isFinite(paquetes) || !Number.isFinite(sueltas) || paquetes < -EPSILON || sueltas < -EPSILON) {
+  const paquetes = aDecimal(captura.paquetes ?? 0);
+  const sueltas = aDecimal(captura.sueltas ?? 0);
+  if (!paquetes || !sueltas || paquetes.isNeg() || sueltas.isNeg()) {
     throw new ErrorNegocio("CONTEO_INVALIDO");
   }
 
@@ -441,16 +442,16 @@ export async function resolverConteoTx(
 
   // ===== Captura directa en la unidad base del producto =====
   if (codigoCaptura === producto.unidad) {
-    if (paquetes > EPSILON) throw new ErrorNegocio("CONTEO_UNIDAD_INVALIDA");
-    if (sueltas <= EPSILON) throw new ErrorNegocio("CONTEO_INVALIDO");
+    if (!paquetes.isZero()) throw new ErrorNegocio("CONTEO_UNIDAD_INVALIDA");
+    if (!sueltas.isPositive()) throw new ErrorNegocio("CONTEO_INVALIDO");
     return {
       cantidad: sueltas,
       partes: [
         {
           unidad: producto.unidad,
           nombre: base?.nombre ?? producto.unidad,
-          factor: 1,
-          cantidad: sueltas,
+          factor: "1",
+          cantidad: sueltas.toString(),
         },
       ],
     };
@@ -471,24 +472,30 @@ export async function resolverConteoTx(
   if (unidad.tipo !== "PAQUETE" || !unidad.activo) throw new ErrorNegocio("CONTEO_UNIDAD_INVALIDA");
   if (unidad.unidadBase !== producto.unidad) throw new ErrorNegocio("CONTEO_UNIDAD_INCOMPATIBLE");
 
-  const contenido = producto.contenidoPaquete;
-  if (!Number.isFinite(contenido) || contenido <= EPSILON) {
+  const contenido = aDecimal(producto.contenidoPaquete);
+  if (!contenido || !contenido.isPositive()) {
     throw new ErrorNegocio("CONTEO_UNIDAD_INVALIDA");
   }
 
-  const cantidad = paquetes * contenido + sueltas;
-  if (cantidad <= EPSILON) throw new ErrorNegocio("CONTEO_INVALIDO");
+  // Aritmética EXACTA: cantidad = paquetes × contenido + sueltas (unidad base)
+  const cantidad = paquetes.times(contenido).plus(sueltas);
+  if (!cantidad.isPositive()) throw new ErrorNegocio("CONTEO_INVALIDO");
 
   const partes: ParteConteo[] = [];
-  if (paquetes > EPSILON) {
-    partes.push({ unidad: unidad.codigo, nombre: unidad.nombre, factor: contenido, cantidad: paquetes });
+  if (paquetes.isPositive()) {
+    partes.push({
+      unidad: unidad.codigo,
+      nombre: unidad.nombre,
+      factor: contenido.toString(),
+      cantidad: paquetes.toString(),
+    });
   }
-  if (sueltas > EPSILON) {
+  if (sueltas.isPositive()) {
     partes.push({
       unidad: producto.unidad,
       nombre: base?.nombre ?? producto.unidad,
-      factor: 1,
-      cantidad: sueltas,
+      factor: "1",
+      cantidad: sueltas.toString(),
     });
   }
 
@@ -501,19 +508,29 @@ export async function resolverConteoTx(
  * el factor/nombre del snapshot. Devuelve el detalle agregado y el
  * total en unidad base.
  */
-export function fusionarPartesConteo(partes: ParteConteo[]): { partes: ParteConteo[]; cantidad: number } {
+export function fusionarPartesConteo(partes: ParteConteo[]): { partes: ParteConteo[]; cantidad: Decimal } {
   const fusion = new Map<string, ParteConteo>();
-  let cantidad = 0;
+  let cantidad = CERO;
   for (const parte of partes) {
+    const cantidadParte = desdeBD(String(parte.cantidad), "ParteConteo.cantidad");
+    const factorParte = desdeBD(String(parte.factor), "ParteConteo.factor");
     const previa = fusion.get(parte.unidad);
     if (previa) {
-      previa.cantidad += parte.cantidad;
+      previa.cantidad = desdeBD(String(previa.cantidad), "ParteConteo.cantidad")
+        .plus(cantidadParte)
+        .toString();
     } else {
       fusion.set(parte.unidad, { ...parte });
     }
-    cantidad += parte.cantidad * parte.factor;
+    // Aritmética EXACTA: nunca mezclar float en la fusión multi-línea
+    cantidad = cantidad.plus(cantidadParte.times(factorParte));
   }
   // Paquetes primero, unidades sueltas de la base al final
-  const lista = [...fusion.values()].sort((a, b) => b.factor - a.factor);
-  return { partes: lista.filter((p) => p.cantidad > EPSILON), cantidad };
+  const lista = [...fusion.values()].sort((a, b) =>
+    desdeBD(String(b.factor), "ParteConteo.factor").cmp(desdeBD(String(a.factor), "ParteConteo.factor")),
+  );
+  return {
+    partes: lista.filter((p) => desdeBD(String(p.cantidad), "ParteConteo.cantidad").isPositive()),
+    cantidad,
+  };
 }

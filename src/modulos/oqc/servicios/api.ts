@@ -112,7 +112,8 @@ export const corregirScrap = (
   cuerpo: {
     productoId?: string;
     almacenId?: string;
-    cantidad?: number;
+    /** Texto decimal exacto en unidad base */
+    cantidad?: string;
     motivo?: string;
     notas?: string;
     responsable?: string;

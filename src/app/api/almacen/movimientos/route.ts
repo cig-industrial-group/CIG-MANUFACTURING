@@ -17,6 +17,7 @@ import {
   productosVivos,
   registrarMovimientoTx,
 } from "@/modulos/almacen/servicios/nucleo";
+import { aDecimal } from "@/lib/numerico";
 import type { TipoMovimiento } from "@/modulos/almacen/tipos";
 
 const TIPOS_VALIDOS: TipoMovimiento[] = ["ENTRADA", "RECEPCION", "SALIDA", "TRASLADO", "AJUSTE"];
@@ -125,13 +126,19 @@ export async function POST(request: Request) {
     if (guardia instanceof NextResponse) return guardia;
     const { usuario } = guardia;
 
+    // Validación decimal exacta (fail-closed): sin coerción silenciosa
+    const cantidad = aDecimal(cuerpo.cantidad);
+    if (!cantidad) {
+      return NextResponse.json({ error: "QUANTIDAD_INVALIDA" }, { status: 400 });
+    }
+
     const resultado = await db.$transaction((tx) =>
       registrarMovimientoTx(tx, {
         tipo,
         productoId: String(cuerpo.productoId),
         almacenOrigenId: cuerpo.almacenOrigenId || undefined,
         almacenDestinoId: cuerpo.almacenDestinoId || undefined,
-        cantidad: Number(cuerpo.cantidad),
+        cantidad,
         motivo: cuerpo.motivo,
         referencia: cuerpo.referencia,
         // Si no se captura responsable, se asigna el usuario de la sesión
@@ -139,12 +146,13 @@ export async function POST(request: Request) {
         usuarioId: usuario.id,
         usuarioNombre: usuario.nombre,
         // Conteo en paquetes (opcional): { unidad, paquetes, sueltas }.
-        // El servidor calcula la cantidad en unidad base de forma autoritativa.
+        // El servidor calcula la cantidad en unidad base de forma autoritativa
+        // (los valores viajan tal cual: el núcleo los valida con Decimal).
         ...(cuerpo.conteo?.unidad && {
           conteo: {
             unidad: String(cuerpo.conteo.unidad),
-            paquetes: Number(cuerpo.conteo.paquetes ?? 0),
-            sueltas: Number(cuerpo.conteo.sueltas ?? 0),
+            paquetes: cuerpo.conteo.paquetes ?? 0,
+            sueltas: cuerpo.conteo.sueltas ?? 0,
           },
         }),
       }),

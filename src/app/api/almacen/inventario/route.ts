@@ -10,6 +10,7 @@
 
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { CERO, desdeBD, multiplicar } from "@/lib/numerico";
 import { requerirPermiso } from "@/modulos/autenticacion/servicios/auth";
 
 // GET /api/almacen/inventario — Existencias por producto y almacén
@@ -27,7 +28,8 @@ export async function GET(request: Request) {
   const where: Record<string, unknown> = {};
   if (almacenId) where.almacenId = almacenId;
   if (productoId) where.productoId = productoId;
-  if (conStock) where.cantidad = { gt: 0 };
+  // «conStock» (cantidad > 0) se filtra en la capa de aplicación con
+  // comparación Decimal exacta (el SQL no compara texto decimal)
   if (q) {
     where.OR = [
       { producto: { sku: { contains: q } } },
@@ -55,20 +57,23 @@ export async function GET(request: Request) {
   });
 
   return NextResponse.json(
-    filas.map((f) => ({
-      id: f.id,
-      cantidad: f.cantidad,
-      productoId: f.producto.id,
-      sku: f.producto.sku,
-      productoNombre: f.producto.nombre,
-      categoria: f.producto.categoria,
-      unidad: f.producto.unidad,
-      stockMinimo: f.producto.stockMinimo,
-      costoUnitario: f.producto.costoUnitario,
-      almacenId: f.almacen.id,
-      almacenCodigo: f.almacen.codigo,
-      almacenNombre: f.almacen.nombre,
-      valor: f.cantidad * (f.producto.costoUnitario ?? 0),
-    })),
+    filas
+      .filter((f) => !conStock || desdeBD(f.cantidad, "Stock.cantidad").isPositive())
+      .map((f) => ({
+        id: f.id,
+        cantidad: f.cantidad,
+        productoId: f.producto.id,
+        sku: f.producto.sku,
+        productoNombre: f.producto.nombre,
+        categoria: f.producto.categoria,
+        unidad: f.producto.unidad,
+        stockMinimo: f.producto.stockMinimo,
+        costoUnitario: f.producto.costoUnitario,
+        almacenId: f.almacen.id,
+        almacenCodigo: f.almacen.codigo,
+        almacenNombre: f.almacen.nombre,
+        // Valoración exacta: cantidad × costoUnitario en Decimal
+        valor: multiplicar(f.cantidad, f.producto.costoUnitario ?? CERO.toString()).toString(),
+      })),
   );
 }

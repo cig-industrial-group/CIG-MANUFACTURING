@@ -251,7 +251,11 @@ export function PanelGeneral() {
               ) : (
                 <ul className="max-h-72 space-y-3 overflow-y-auto pr-1">
                   {data.stockBajo.map((p) => {
-                    const ratio = Math.min(100, Math.round((p.stockTotal / Math.max(p.stockMinimo, 1)) * 100));
+                    // Porcentaje de la barra de progreso (solo presentación)
+                    const ratio = Math.min(
+                      100,
+                      Math.round((Number(p.stockTotal) / Math.max(Number(p.stockMinimo), 1)) * 100),
+                    );
                     return (
                       <li key={p.id} className="space-y-1.5">
                         <div className="flex items-center justify-between gap-2 text-sm">

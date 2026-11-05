@@ -57,7 +57,8 @@ export async function POST(request: Request) {
         const unidadConteo = linea.conteo?.unidad ? String(linea.conteo.unidad) : null;
         return {
           productoId: String(linea.productoId ?? ""),
-          cantidad: Number(linea.cantidad),
+          // Decimal como texto: la validación exacta la hace el núcleo (fail-closed)
+          cantidad: linea.cantidad === undefined || linea.cantidad === null ? "" : String(linea.cantidad),
           ...(unidadConteo && {
             conteo: {
               unidad: unidadConteo,

@@ -35,7 +35,7 @@ export async function PATCH(request: Request, { params }: Ctx) {
       {
         productoId: cuerpo.productoId,
         almacenId: cuerpo.almacenId,
-        cantidad: cuerpo.cantidad !== undefined ? Number(cuerpo.cantidad) : undefined,
+        cantidad: cuerpo.cantidad !== undefined ? String(cuerpo.cantidad) : undefined,
         motivo: cuerpo.motivo,
         notas: cuerpo.notas,
         responsable: cuerpo.responsable,

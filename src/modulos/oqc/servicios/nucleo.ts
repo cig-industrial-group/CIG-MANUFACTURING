@@ -22,6 +22,7 @@
  *   efecto sobre stock.
  */
 import { db } from "@/lib/db";
+import { CERO, type Decimal, aDecimal } from "@/lib/numerico";
 import {
   ErrorNegocio,
   editarMovimientoTx,
@@ -52,7 +53,7 @@ import type {
 
 type PrismaTx = Parameters<Parameters<typeof db.$transaction>[0]>[0];
 
-const EPSILON = 1e-9;
+// Aritmética EXACTA (Decimal): el EPSILON de la era float desaparece.
 
 // ============================================================
 // FOLIOS
@@ -151,7 +152,10 @@ export function aSalidaOQC(
     updatedAt: s.updatedAt.toISOString(),
     partidas,
     totalPartidas: partidas.length,
-    totalUnidades: partidas.reduce((acc, p) => acc + Math.abs(p.cantidad), 0),
+    // Suma Decimal exacta de |cantidad| (se responde como texto decimal)
+    totalUnidades: partidas
+      .reduce((acc, p) => acc.plus(aDecimal(p.cantidad)?.abs() ?? CERO), CERO)
+      .toString(),
   };
 }
 
@@ -172,7 +176,7 @@ export function aRegistroScrap(r: {
   almacenId: string | null;
   almacenCodigo: string | null;
   almacenNombre: string | null;
-  cantidad: number;
+  cantidad: string;
   motivo: string;
   notas: string | null;
   responsable: string | null;
@@ -204,7 +208,7 @@ export function aRegistroRechazo(r: {
   clienteNombre: string | null;
   salidaId: string | null;
   salidaFolio: string | null;
-  cantidad: number;
+  cantidad: string;
   motivo: string;
   disposicion: string;
   notas: string | null;
@@ -261,7 +265,7 @@ export async function liberarSalidaOQC(args: {
     // el total se calcula de forma autoritativa contra el catálogo de
     // unidades y las capturas del mismo producto se agregan.
     interface Acumulado {
-      cantidad: number;
+      cantidad: Decimal;
       partes: ParteConteo[];
       unidadBase: string;
       nombreBase: string;
@@ -275,18 +279,25 @@ export async function liberarSalidaOQC(args: {
       // Conteo en paquetes (opcional por línea): valida contra el empaque
       // configurado del producto (unidadPaquete + contenidoPaquete)
       const conteo = await resolverConteoTx(tx, producto, linea.conteo);
-      let cantidad = conteo ? conteo.cantidad : Math.abs(Number(linea?.cantidad));
-      if (!Number.isFinite(cantidad) || cantidad <= EPSILON) {
+      let cantidad: Decimal;
+      if (conteo) {
+        cantidad = conteo.cantidad;
+      } else {
+        const directa = aDecimal(linea?.cantidad);
+        if (!directa || !directa.isPositive()) throw new ErrorNegocio("QUANTIDAD_INVALIDA");
+        cantidad = directa.abs();
+      }
+      if (!cantidad.isFinite() || !cantidad.isPositive()) {
         throw new ErrorNegocio("QUANTIDAD_INVALIDA");
       }
 
       const previo = acumulados.get(linea.productoId) ?? {
-        cantidad: 0,
+        cantidad: CERO,
         partes: [],
         unidadBase: producto.unidad,
         nombreBase: producto.unidad,
       };
-      previo.cantidad += cantidad;
+      previo.cantidad = previo.cantidad.plus(cantidad);
       if (conteo) {
         previo.partes.push(...conteo.partes);
       } else if (previo.partes.length > 0) {
@@ -295,8 +306,8 @@ export async function liberarSalidaOQC(args: {
         previo.partes.push({
           unidad: previo.unidadBase,
           nombre: previo.nombreBase,
-          factor: 1,
-          cantidad,
+          factor: "1",
+          cantidad: cantidad.toString(),
         });
       }
       acumulados.set(linea.productoId, previo);
@@ -381,13 +392,17 @@ export async function corregirPartidaSalidaOQC(
     const partida = partidas.find((p) => p.id === partidaId);
     if (!partida) throw new ErrorNegocio("PARTIDA_NO_EXISTE", 404);
 
+    // Validación decimal exacta antes de corregir la partida (fail-closed)
+    const cantidad = aDecimal(cuerpo.cantidad);
+    if (!cantidad) throw new ErrorNegocio("QUANTIDAD_INVALIDA");
+
     const actualizado = await editarMovimientoTx(
       tx,
       partidaId,
       {
         productoId: cuerpo.productoId,
         almacenOrigenId: cuerpo.almacenOrigenId ?? salida.almacenOrigenId ?? undefined,
-        cantidad: cuerpo.cantidad,
+        cantidad,
         motivo: cuerpo.motivo,
         // Espejo de la cabecera (mismas reglas que al liberar): si la
         // remisión está vacía, la partida muestra el folio de la salida;
@@ -561,9 +576,14 @@ export async function registrarScrapOQC(
 
     // Con conteo en paquetes la cantidad en unidad base la calcula
     // registrarMovimientoTx (autoritativo); sin conteo se valida aquí.
+    let cantidadScrap: Decimal;
     if (!cuerpo.conteo?.unidad) {
-      const cantidad = Math.abs(Number(cuerpo.cantidad));
-      if (!Number.isFinite(cantidad) || cantidad <= EPSILON) throw new ErrorNegocio("QUANTIDAD_INVALIDA");
+      const directa = aDecimal(cuerpo.cantidad);
+      if (!directa || !directa.isPositive()) throw new ErrorNegocio("QUANTIDAD_INVALIDA");
+      cantidadScrap = directa.abs();
+    } else {
+      // El conteo se resuelve de forma autoritativa dentro del registro
+      cantidadScrap = CERO;
     }
 
     // El movimiento SCRAP genera el folio SCR-... (el conteo en paquetes,
@@ -572,7 +592,7 @@ export async function registrarScrapOQC(
       tipo: "SCRAP",
       productoId: cuerpo.productoId,
       almacenOrigenId: cuerpo.almacenId,
-      cantidad: Math.abs(Number(cuerpo.cantidad)) || 0,
+      cantidad: cantidadScrap,
       motivo: cuerpo.motivo.trim(),
       responsable: cuerpo.responsable?.trim() || usuario.nombre,
       usuarioId: usuario.id,
@@ -614,7 +634,7 @@ export async function corregirScrapOQC(
   cuerpo: {
     productoId?: string;
     almacenId?: string;
-    cantidad?: number;
+    cantidad?: string;
     motivo?: string;
     notas?: string;
     responsable?: string;
@@ -629,7 +649,10 @@ export async function corregirScrapOQC(
 
     const productoId = cuerpo.productoId ?? registro.productoId;
     const almacenId = cuerpo.almacenId ?? registro.almacenId ?? undefined;
-    const cantidad = cuerpo.cantidad !== undefined ? Number(cuerpo.cantidad) : registro.cantidad;
+    const cantidadDecimal = aDecimal(
+      cuerpo.cantidad !== undefined ? cuerpo.cantidad : registro.cantidad,
+    );
+    if (!cantidadDecimal) throw new ErrorNegocio("QUANTIDAD_INVALIDA");
 
     const actualizado = await editarMovimientoTx(
       tx,
@@ -637,7 +660,7 @@ export async function corregirScrapOQC(
       {
         productoId,
         almacenOrigenId: almacenId,
-        cantidad,
+        cantidad: cantidadDecimal,
         motivo: cuerpo.motivo ?? registro.motivo,
         referencia: undefined,
         responsable: cuerpo.responsable ?? registro.responsable ?? undefined,
@@ -708,8 +731,9 @@ export async function registrarRechazoOQC(
 ) {
   return db.$transaction(async (tx) => {
     if (!cuerpo.productoId) throw new ErrorNegocio("PRODUCTO_REQUERIDO");
-    const cantidad = Math.abs(Number(cuerpo.cantidad));
-    if (!Number.isFinite(cantidad) || cantidad <= EPSILON) throw new ErrorNegocio("QUANTIDAD_INVALIDA");
+    const cantidadDecimal = aDecimal(cuerpo.cantidad);
+    if (!cantidadDecimal || !cantidadDecimal.isPositive()) throw new ErrorNegocio("QUANTIDAD_INVALIDA");
+    const cantidad = cantidadDecimal.abs().toString();
     if (!cuerpo.motivo?.trim()) throw new ErrorNegocio("MOTIVO_RECHAZO_REQUERIDO");
 
     const producto = await tx.producto.findUnique({ where: { id: cuerpo.productoId } });
@@ -764,7 +788,7 @@ export async function registrarRechazoOQC(
 export async function editarRechazoOQC(id: string, cuerpo: {
   productoId?: string;
   clienteId?: string | null;
-  cantidad?: number;
+  cantidad?: string;
   motivo?: string;
   disposicion?: DisposicionRechazo;
   notas?: string;
@@ -794,9 +818,11 @@ export async function editarRechazoOQC(id: string, cuerpo: {
       producto = { id: p.id, sku: p.sku, nombre: p.nombre, unidad: p.unidad };
     }
 
-    const cantidad =
-      cuerpo.cantidad !== undefined ? Math.abs(Number(cuerpo.cantidad)) : registro.cantidad;
-    if (!Number.isFinite(cantidad) || cantidad <= EPSILON) throw new ErrorNegocio("QUANTIDAD_INVALIDA");
+    const cantidadDecimal = aDecimal(
+      cuerpo.cantidad !== undefined ? cuerpo.cantidad : registro.cantidad,
+    );
+    if (!cantidadDecimal || !cantidadDecimal.isPositive()) throw new ErrorNegocio("QUANTIDAD_INVALIDA");
+    const cantidad = cantidadDecimal.abs().toString();
 
     const disposicion =
       cuerpo.disposicion && DISPOSICIONES.includes(cuerpo.disposicion)

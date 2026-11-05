@@ -44,10 +44,10 @@ export interface Almacen {
   responsable: string | null;
   activo: boolean;
   createdAt: string;
-  // Agregados calculados
+  // Agregados calculados (texto decimal exacto — remediación Fase 1)
   numProductos: number;
-  totalUnidades: number;
-  valorInventario: number;
+  totalUnidades: string;
+  valorInventario: string;
 }
 
 export interface Producto {
@@ -59,21 +59,25 @@ export interface Producto {
   unidad: string;
   /** Unidad de empaque para conteo (PAQ, CJA...); null = captura directa */
   unidadPaquete: string | null;
-  /** Unidades base que contiene cada paquete (p. ej. 10 PZ por PAQ) */
-  contenidoPaquete: number | null;
-  stockMinimo: number;
-  costoUnitario: number | null;
+  /** Unidades base que contiene cada paquete (texto decimal exacto, p. ej. "10") */
+  contenidoPaquete: string | null;
+  /** Mínimo de stock (texto decimal exacto en unidad base) */
+  stockMinimo: string;
+  /** Costo por unidad (texto decimal exacto; null = sin costo) */
+  costoUnitario: string | null;
   activo: boolean;
   createdAt: string;
-  stockTotal: number;
+  /** Agregado calculado: total en unidad base (texto decimal exacto) */
+  stockTotal: string;
 }
 
 export interface MovimientoResumen {
   id: string;
   folio: string;
   tipo: string;
-  cantidad: number;
-  cantidadDespues: number | null;
+  /** Cantidad en unidad base (texto decimal exacto) */
+  cantidad: string;
+  cantidadDespues: string | null;
   motivo: string | null;
   referencia: string | null;
   responsable: string | null;
@@ -129,40 +133,43 @@ export interface DetalleMovimiento {
 
 export interface FilaStock {
   id: string;
-  cantidad: number;
+  /** Existencia en unidad base (texto decimal exacto) */
+  cantidad: string;
   productoId: string;
   sku: string;
   productoNombre: string;
   categoria: string;
   unidad: string;
-  stockMinimo: number;
-  costoUnitario: number | null;
+  stockMinimo: string;
+  costoUnitario: string | null;
   almacenId: string;
   almacenCodigo: string;
   almacenNombre: string;
-  valor: number;
+  /** Valor = cantidad × costoUnitario (texto decimal exacto) */
+  valor: string;
 }
 
 export interface Estadisticas {
   productosActivos: number;
   almacenesActivos: number;
-  unidadesStock: number;
-  valorInventario: number;
+  /** Agregados en texto decimal exacto (suma Decimal en servidor) */
+  unidadesStock: string;
+  valorInventario: string;
   movimientos7Dias: number;
   stockBajo: Array<{
     id: string;
     sku: string;
     nombre: string;
     unidad: string;
-    stockTotal: number;
-    stockMinimo: number;
+    stockTotal: string;
+    stockMinimo: string;
   }>;
   serieActividad: Array<{ fecha: string; entradas: number; salidas: number }>;
   distribucionAlmacenes: Array<{
     codigo: string;
     nombre: string;
-    unidades: number;
-    valor: number;
+    unidades: string;
+    valor: string;
   }>;
   movimientosRecientes: MovimientoResumen[];
 }
@@ -184,19 +191,22 @@ export interface CuerpoProducto {
   categoria: string;
   unidad: string;
   unidadPaquete?: string | null;
-  contenidoPaquete?: number | null;
-  stockMinimo: number;
-  costoUnitario?: number | null;
+  /** Texto decimal exacto ("10"; máx. 6 decimales) */
+  contenidoPaquete?: string | null;
+  /** Texto decimal exacto ("0"; máx. 6 decimales) */
+  stockMinimo: string;
+  /** Texto decimal exacto ("12.5"; máx. 6 decimales); null/"" = sin costo */
+  costoUnitario?: string | null;
 }
 
 /** Conteo en paquetes: captura alternativa a la cantidad directa */
 export interface CapturaConteoCuerpo {
   /** código de la unidad de paquete (CJA, PAQ...) */
   unidad: string;
-  /** paquetes completos */
-  paquetes?: number;
-  /** unidades sueltas de la base (piezas fuera de paquete) */
-  sueltas?: number;
+  /** paquetes completos (entero; texto o número legado) */
+  paquetes?: number | string;
+  /** unidades sueltas de la base (piezas fuera de paquete; decimal exacto) */
+  sueltas?: number | string;
 }
 
 export interface CuerpoMovimiento {
@@ -204,7 +214,8 @@ export interface CuerpoMovimiento {
   productoId: string;
   almacenOrigenId?: string;
   almacenDestinoId?: string;
-  cantidad: number;
+  /** Texto decimal exacto en unidad base ("12.5"; máx. 6 decimales) */
+  cantidad: string;
   motivo?: string;
   referencia?: string;
   responsable?: string;
@@ -217,7 +228,8 @@ export interface CuerpoEdicionMovimiento {
   productoId: string;
   almacenOrigenId?: string;
   almacenDestinoId?: string;
-  cantidad: number;
+  /** Texto decimal exacto en unidad base */
+  cantidad: string;
   motivo?: string;
   referencia?: string;
   responsable?: string;

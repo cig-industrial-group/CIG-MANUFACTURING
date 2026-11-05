@@ -55,7 +55,7 @@ import {
 } from "../servicios/consultas";
 import { ErrorApi } from "../servicios/api";
 import { claveErrorApi } from "../servicios/errores";
-import { textoConteo } from "@/modulos/unidades/tipos";
+import { aTextoDecimal, textoConteo } from "@/modulos/unidades/tipos";
 import { InsigniaCorregido, InsigniaProductoEliminado, InsigniaTipoMovimiento, SelectorAlmacen, SelectorProducto } from "./compartidos";
 import type { Almacen, CorreccionResumen, MovimientoResumen, Producto } from "../tipos";
 import { Button } from "@/components/ui/button";
@@ -286,12 +286,12 @@ export function RegistrosSeccion({
                     <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold tabular-nums">
                       <span
                         className={cn(
-                          m.tipo === "SALIDA" || (m.tipo === "AJUSTE" && m.cantidad < 0)
+                          m.tipo === "SALIDA" || (m.tipo === "AJUSTE" && m.cantidad.startsWith("-"))
                             ? "text-orange-600 dark:text-orange-400"
                             : "text-emerald-600 dark:text-emerald-400",
                         )}
                       >
-                        {m.tipo === "AJUSTE" && m.cantidad > 0 ? "+" : ""}
+                        {m.tipo === "AJUSTE" && !m.cantidad.startsWith("-") ? "+" : ""}
                         {m.tipo === "SALIDA" ? "−" : ""}
                         {f.numero(m.cantidad, 2)}
                       </span>{" "}
@@ -413,12 +413,12 @@ export function RegistrosSeccion({
                   <span
                     className={cn(
                       "shrink-0 font-bold tabular-nums",
-                      m.tipo === "SALIDA" || (m.tipo === "AJUSTE" && m.cantidad < 0)
+                      m.tipo === "SALIDA" || (m.tipo === "AJUSTE" && m.cantidad.startsWith("-"))
                         ? "text-orange-600 dark:text-orange-400"
                         : "text-emerald-600 dark:text-emerald-400",
                     )}
                   >
-                    {m.tipo === "SALIDA" ? "−" : m.tipo === "AJUSTE" && m.cantidad > 0 ? "+" : ""}
+                    {m.tipo === "SALIDA" ? "−" : m.tipo === "AJUSTE" && !m.cantidad.startsWith("-") ? "+" : ""}
                     {f.numero(m.cantidad, 1)} {m.productoUnidad}
                   </span>
                   {m.conteo && (
@@ -746,14 +746,15 @@ function DialogoEdicion({
 
   async function guardar() {
     setError(null);
-    const cantidadNum = Number(cantidad);
+    // Validación decimal exacta del lado cliente (el servidor revalida)
+    const cantidadDecimal = aTextoDecimal(cantidad);
     if (!productoId) return setError(t("validaciones.productoRequerido"));
     if (requiereOrigen && !almacenOrigenId) return setError(t("validaciones.almacenRequerido"));
     if (requiereDestino && !almacenDestinoId) return setError(t("validaciones.almacenRequerido"));
-    if (!Number.isFinite(cantidadNum) || cantidadNum === 0) {
+    if (cantidadDecimal === null || cantidadDecimal === "0" || cantidadDecimal === "-0") {
       return setError(t("validaciones.cantidadRequerida"));
     }
-    if (movimiento.tipo !== "AJUSTE" && cantidadNum < 0) {
+    if (movimiento.tipo !== "AJUSTE" && cantidadDecimal.startsWith("-")) {
       return setError(t("comun.cantidadInvalida"));
     }
     if (movimiento.tipo === "TRASLADO" && almacenOrigenId === almacenDestinoId) {
@@ -768,7 +769,7 @@ function DialogoEdicion({
           productoId,
           almacenOrigenId: requiereOrigen ? almacenOrigenId : undefined,
           almacenDestinoId: requiereDestino ? almacenDestinoId : undefined,
-          cantidad: cantidadNum,
+          cantidad: cantidadDecimal,
           // Cadenas crudas (vacía = limpiar). En partidas de una salida OQC
           // la remisión y el responsable no se envían: se conservan desde
           // la cabecera para no desincronizar el historial de movimientos.
@@ -833,7 +834,7 @@ function DialogoEdicion({
                   <p className="text-xs text-muted-foreground">
                     {t("operacion.stockOrigen")}:{" "}
                     <span className="font-semibold tabular-nums text-foreground">
-                      {f.numero(stockOrigen?.find((s) => s.productoId === productoId)?.cantidad ?? 0, 2)}{" "}
+                      {f.numero(stockOrigen?.find((s) => s.productoId === productoId)?.cantidad ?? "0", 2)}{" "}
                       {productoSel ? productoSel.unidad : ""}
                     </span>
                   </p>
