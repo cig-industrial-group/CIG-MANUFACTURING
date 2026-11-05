@@ -871,8 +871,9 @@ arrancar_servicios() {
 }
 
 # ------------------------------------------------------- VERIFICACIONES
-esperar_http() { # esperar_http <url> <segundos> <descripción>
-  local url="$1" segundos="$2" desc="$3" intentos=$((segundos / 3)) i
+esperar_http() { # esperar_http <url> [segundos=30] [descripción]
+  local url="$1" segundos="${2:-30}" desc="${3:-}"
+  local intentos=$((segundos / 3)) i
   for ((i = 1; i <= intentos; i++)); do
     if curl -fsS -o /dev/null --max-time 5 "$url"; then
       ok "${desc} responde (${url})"
