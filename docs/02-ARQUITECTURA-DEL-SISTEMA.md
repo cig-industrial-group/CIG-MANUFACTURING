@@ -29,7 +29,9 @@ Ruta API — src/app/api/**/route.ts
 Lógica del módulo — src/modulos/<modulo>/servicios/nucleo.ts
   │  reglas de negocio, folios, snapshots, bitácoras, transacciones
   ▼
-Prisma Client (singleton) — src/lib/db.ts
+Transacciones con reintentos — src/lib/reintentos.ts (Fase 3)
+  ▼
+Prisma Client (singleton + WAL/pool=1/busy_timeout) — src/lib/db.ts
   ▼
 SQLite (archivo único) — DATABASE_URL (db/custom.db o db/production.db)
 ```
@@ -129,7 +131,9 @@ CIG-MANUFACTURING/
 │   │   └── compartidos/           #   ui/ (componentes del dominio), idioma/, errores.ts
 │   ├── components/ui/             # Componentes shadcn/ui (vocabulario UI base)
 │   ├── hooks/                     # use-toast, use-mobile
-│   ├── lib/                       # db.ts (Prisma singleton), utils.ts (cn)
+│   ├── lib/                       # db.ts (Prisma singleton, endurecimiento Fase 2),
+│   │                              # reintentos.ts (Fase 3), numerico.ts (Decimal, Fase 1),
+│   │                              # utils.ts (cn)
 │   └── instrumentation.ts         # Validación de AUTH_SECRET AL ARRANQUE (fail-secure)
 ├── scripts/                       # Operación, migraciones puntuales y pruebas E2E
 │   ├── seed.ts                    #   (alias de siembra usado por CI)

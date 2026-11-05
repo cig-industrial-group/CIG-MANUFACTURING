@@ -85,11 +85,18 @@ con.row_factory = sqlite3.Row
 cur = con.cursor()
 
 
+
+def num(x):
+    """Fase 1 (Decimal): los numéricos viajan como texto JSON; se coercen."""
+    return float(x) if isinstance(x, (str, int, float)) else x
+
 def stock(producto_id, almacen_id):
     r = cur.execute(
         "SELECT cantidad FROM Stock WHERE productoId=? AND almacenId=?",
         (producto_id, almacen_id)).fetchone()
-    return r[0] if r else 0.0
+    # Fase 1 (Decimal): SQLite devuelve las cantidades como str (TEXT);
+    # se coerce a float para la aritmética de las verificaciones.
+    return float(r[0]) if r else 0.0
 
 
 print("=" * 64)
@@ -166,7 +173,7 @@ sc, p129 = req("POST", "/api/almacen/productos", {
 })
 check("80101-06129 registrado: 1 PAQ = 10 PZA",
       sc == 201 and p129["unidad"] == "PZA" and p129["unidadPaquete"] == "PAQ"
-      and p129["contenidoPaquete"] == 10, (sc, p129))
+      and num(p129["contenidoPaquete"]) == 10, (sc, p129))
 
 sc, p130 = req("POST", "/api/almacen/productos", {
     "sku": "80101-06130", "nombre": "Producto E2E con paquete de 24",
@@ -174,7 +181,7 @@ sc, p130 = req("POST", "/api/almacen/productos", {
     "unidadPaquete": "PAQ", "contenidoPaquete": 24, "stockMinimo": 0,
 })
 check("80101-06130 registrado: 1 PAQ = 24 PZA (factor distinto en el MISMO PAQ)",
-      sc == 201 and p130["unidadPaquete"] == "PAQ" and p130["contenidoPaquete"] == 24, (sc, p130))
+      sc == 201 and p130["unidadPaquete"] == "PAQ" and num(p130["contenidoPaquete"]) == 24, (sc, p130))
 
 # Validaciones del empaque
 sc, resp = req("POST", "/api/almacen/productos", {
@@ -239,10 +246,10 @@ sc, mov = req("POST", "/api/almacen/movimientos", {
     "motivo": "E2E unidades",
 })
 check("80101-06129: entrada 2 PAQ×10 + 3 sueltas → 23 PZA",
-      sc == 201 and mov["cantidad"] == 23, (sc, mov))
+      sc == 201 and num(mov["cantidad"]) == 23, (sc, mov))
 check("conteo en el resumen (partes con factor del PRODUCTO)",
-      mov.get("conteo") and mov["conteo"][0]["unidad"] == "PAQ" and mov["conteo"][0]["factor"] == 10
-      and mov["conteo"][1]["unidad"] == "PZA" and mov["conteo"][1]["cantidad"] == 3, mov.get("conteo"))
+      mov.get("conteo") and mov["conteo"][0]["unidad"] == "PAQ" and num(mov["conteo"][0]["factor"]) == 10
+      and mov["conteo"][1]["unidad"] == "PZA" and num(mov["conteo"][1]["cantidad"]) == 3, mov.get("conteo"))
 check("stock en unidad base (+23)", abs(stock(p129["id"], almacen["id"]) - (antes + 23)) < 1e-6,
       (antes, stock(p129["id"], almacen["id"])))
 
@@ -254,7 +261,7 @@ sc, mov130 = req("POST", "/api/almacen/movimientos", {
     "motivo": "E2E unidades",
 })
 check("80101-06130: entrada 2 PAQ×24 → 48 PZA (mismo PAQ, otro factor)",
-      sc == 201 and mov130["cantidad"] == 48, (sc, mov130))
+      sc == 201 and num(mov130["cantidad"]) == 48, (sc, mov130))
 
 sc, mov2 = req("POST", "/api/almacen/movimientos", {
     "tipo": "SALIDA", "productoId": p129["id"], "almacenOrigenId": almacen["id"],
@@ -262,7 +269,7 @@ sc, mov2 = req("POST", "/api/almacen/movimientos", {
     "conteo": {"unidad": "PAQ", "paquetes": 1, "sueltas": 0},
     "motivo": "E2E unidades",
 })
-check("salida 1 PAQ → 10 PZA", sc == 201 and mov2["cantidad"] == 10, (sc, mov2))
+check("salida 1 PAQ → 10 PZA", sc == 201 and num(mov2["cantidad"]) == 10, (sc, mov2))
 check("stock tras salida (+13 neto)", abs(stock(p129["id"], almacen["id"]) - (antes + 13)) < 1e-6,
       stock(p129["id"], almacen["id"]))
 
@@ -293,7 +300,7 @@ sc, movdirecto = req("POST", "/api/almacen/movimientos", {
     "motivo": "E2E unidades (directo)",
 })
 check("captura directa declarada (unidad PZA, 7 sueltas) → 7 PZA",
-      sc == 201 and movdirecto["cantidad"] == 7, (sc, movdirecto))
+      sc == 201 and num(movdirecto["cantidad"]) == 7, (sc, movdirecto))
 
 # Ajuste negativo con conteo (signo de la cantidad manda)
 sc, ajuste = req("POST", "/api/almacen/movimientos", {
@@ -302,7 +309,7 @@ sc, ajuste = req("POST", "/api/almacen/movimientos", {
     "conteo": {"unidad": "PAQ", "paquetes": 1, "sueltas": 2},
 })
 check("ajuste −(1 PAQ×10 + 2) → −12 PZA (signo preservado)",
-      sc == 201 and ajuste["cantidad"] == -12, (sc, ajuste))
+      sc == 201 and num(ajuste["cantidad"]) == -12, (sc, ajuste))
 check("stock tras ajuste (+8 neto)", abs(stock(p129["id"], almacen["id"]) - (antes + 8)) < 1e-6,
       stock(p129["id"], almacen["id"]))
 
@@ -312,7 +319,7 @@ sc, corregido = req("PATCH", f"/api/almacen/movimientos/{ajuste['id']}", {
     "cantidad": -5, "motivo": "Conteo físico E2E",
     "motivoCorreccion": "Recuento E2E",
 })
-check("corrección del ajuste", sc == 200 and corregido["cantidad"] == -5, (sc, corregido))
+check("corrección del ajuste", sc == 200 and num(corregido["cantidad"]) == -5, (sc, corregido))
 check("corrección limpia el conteo (expresado en unidad base)", corregido.get("conteo") is None, corregido.get("conteo"))
 sc, detalle = req("GET", f"/api/almacen/movimientos/{ajuste['id']}")
 antes_bit = detalle["correcciones"][0]["antes"] if detalle.get("correcciones") else {}
@@ -351,12 +358,12 @@ partidas = liberacion["salida"]["partidas"] if sc == 201 and liberacion.get("sal
 part129 = next((p for p in partidas if p["productoId"] == p129["id"]), None)
 part130 = next((p for p in partidas if p["productoId"] == p130["id"]), None)
 check("liberación con conteo por línea (fusión 3 PAQ×10 + 5 = 35)",
-      sc == 201 and part129 and part129["cantidad"] == 35, (sc, liberacion))
+      sc == 201 and part129 and num(part129["cantidad"]) == 35, (sc, liberacion))
 check("partida 129 fusionada: 3 PAQ ×10 + 5 PZA",
-      part129 and part129["conteo"] and part129["conteo"][0]["cantidad"] == 3
-      and part129["conteo"][1]["cantidad"] == 5, part129 and part129.get("conteo"))
+      part129 and part129["conteo"] and num(part129["conteo"][0]["cantidad"]) == 3
+      and num(part129["conteo"][1]["cantidad"]) == 5, part129 and part129.get("conteo"))
 check("línea del producto 130 usa SU factor (1 PAQ×24 + 1 = 25)",
-      part130 and part130["cantidad"] == 25, part130)
+      part130 and num(part130["cantidad"]) == 25, part130)
 check("stock 129 descontado en unidad base (−35)",
       abs(stock(p129["id"], almacen["id"]) - (stock_pre_129 - 35)) < 1e-6,
       (stock_pre_129, stock(p129["id"], almacen["id"])))
@@ -370,7 +377,7 @@ sc, scrap = req("POST", "/api/oqc/scrap", {
     "cantidad": 0, "motivo": "Daño E2E",
     "conteo": {"unidad": "PAQ", "paquetes": 1, "sueltas": 4},
 })
-check("scrap 1 PAQ×10 + 4 → 14 PZA", sc == 201 and scrap["cantidad"] == 14, (sc, scrap))
+check("scrap 1 PAQ×10 + 4 → 14 PZA", sc == 201 and num(scrap["cantidad"]) == 14, (sc, scrap))
 check("scrap conserva el detalle de conteo",
       scrap.get("conteo") and scrap["conteo"][0]["unidad"] == "PAQ", scrap.get("conteo"))
 

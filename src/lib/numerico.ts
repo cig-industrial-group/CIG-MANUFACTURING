@@ -55,6 +55,20 @@ const PATRON_DECIMAL = new RegExp(
 /** Decimal cero: constante para acumuladores y comparaciones. */
 export const CERO: Decimal = new Prisma.Decimal(0);
 
+/**
+ * ¿El valor es ESTRICTAMENTE mayor que cero (> 0)?
+ *
+ * ⚠ TRAMPA DE decimal.js: `isPositive()` INCLUYE el cero (es «no
+ * negativo»), NO significa «> 0». Usarla para validar cantidades o
+ * contenidos estrictamente positivos deja pasar el 0 — defecto real
+ * heredado de la Fase 1 y corregido en la Fase 3 (empaques con
+ * contenido 0, movimientos y liberaciones de cantidad 0). Para exigir
+ * «> 0» usa SIEMPRE esta función.
+ */
+export function esMayorQueCero(valor: Decimal | null | undefined): valor is Decimal {
+  return valor !== null && valor !== undefined && valor.gt(0);
+}
+
 /** ¿Es un texto decimal válido dentro de la escala y magnitud permitidas? */
 export function esDecimalTextual(valor: string): boolean {
   return PATRON_DECIMAL.test(valor.trim());

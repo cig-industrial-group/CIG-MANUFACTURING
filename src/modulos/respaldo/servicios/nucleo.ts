@@ -45,6 +45,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { db } from "@/lib/db";
+import { transaccion } from "@/lib/reintentos";
 import { ErrorNegocio } from "@/modulos/almacen/servicios/nucleo";
 
 type PrismaTx = Parameters<Parameters<typeof db.$transaction>[0]>[0];
@@ -562,7 +563,9 @@ async function restaurarNucleo(args: {
   const t0 = Date.now();
   try {
     // 4. Reemplazo completo EN UNA TRANSACCIÓN: o entra todo, o no entra nada
-    await db.$transaction(
+    //    (con reintentos de la Fase 3: un cerrojo externo transitorio no
+    //    aborta la restauración; el callback se re-ejecuta completo).
+    await transaccion(
       async (tx) => {
         for (const modelo of ordenTablas().borrado) {
           await delegado(tx, modelo).deleteMany();

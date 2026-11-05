@@ -14,8 +14,27 @@
  *
  * Ejecutar: bun scripts/prueba-humo-fase1.ts
  */
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { registrarMovimientoTx, ErrorNegocio } from "../src/modulos/almacen/servicios/nucleo";
+
+// ============================================================
+// CARGA EXPLÍCITA DEL .env DEL PROYECTO (patrón adoptado en la Fase 2):
+// el entorno del shell puede traer un DATABASE_URL heredado ajeno a la
+// app (export de otra sesión) que bun NO sobreescribe con el .env; aquí
+// se fija la configuración real ANTES de crear el cliente.
+// ============================================================
+function cargarEnvProyecto(): void {
+  const directorioScript = path.dirname(fileURLToPath(import.meta.url));
+  const rutaEnv = path.resolve(directorioScript, "..", ".env");
+  for (const linea of fs.readFileSync(rutaEnv, "utf8").split("\n")) {
+    const m = linea.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/);
+    if (m && m[2] !== "") process.env[m[1]] = m[2];
+  }
+}
+cargarEnvProyecto();
 
 const db = new PrismaClient();
 

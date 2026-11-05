@@ -22,7 +22,8 @@
  *   efecto sobre stock.
  */
 import { db } from "@/lib/db";
-import { CERO, type Decimal, aDecimal } from "@/lib/numerico";
+import { transaccion } from "@/lib/reintentos";
+import { CERO, type Decimal, aDecimal, esMayorQueCero } from "@/lib/numerico";
 import {
   ErrorNegocio,
   editarMovimientoTx,
@@ -251,7 +252,7 @@ export async function liberarSalidaOQC(args: {
   notas?: string;
   usuario: { id: string; nombre: string };
 }): Promise<SalidaOQC> {
-  return db.$transaction(async (tx) => {
+  return transaccion(async (tx) => {
     const cliente = await tx.cliente.findUnique({ where: { id: args.clienteId } });
     if (!cliente) throw new ErrorNegocio("CLIENTE_NO_EXISTE", 404);
     if (!cliente.activo) throw new ErrorNegocio("CLIENTE_INACTIVO", 409);
@@ -284,10 +285,11 @@ export async function liberarSalidaOQC(args: {
         cantidad = conteo.cantidad;
       } else {
         const directa = aDecimal(linea?.cantidad);
-        if (!directa || !directa.isPositive()) throw new ErrorNegocio("QUANTIDAD_INVALIDA");
+        // > 0 estricto (Fase 3): isPositive() incluía el 0.
+        if (!esMayorQueCero(directa)) throw new ErrorNegocio("QUANTIDAD_INVALIDA");
         cantidad = directa.abs();
       }
-      if (!cantidad.isFinite() || !cantidad.isPositive()) {
+      if (!cantidad.isFinite() || !esMayorQueCero(cantidad)) {
         throw new ErrorNegocio("QUANTIDAD_INVALIDA");
       }
 
@@ -387,7 +389,7 @@ export async function corregirPartidaSalidaOQC(
   cuerpo: CuerpoEdicionPartida,
   meta: { usuarioId: string; usuarioNombre: string },
 ) {
-  return db.$transaction(async (tx) => {
+  return transaccion(async (tx) => {
     const { salida, partidas } = await salidaEmitidaConPartidas(tx, salidaId);
     const partida = partidas.find((p) => p.id === partidaId);
     if (!partida) throw new ErrorNegocio("PARTIDA_NO_EXISTE", 404);
@@ -430,7 +432,7 @@ export async function eliminarPartidaSalidaOQC(
   partidaId: string,
   meta: { motivoCorreccion: string; usuarioId: string; usuarioNombre: string },
 ) {
-  return db.$transaction(async (tx) => {
+  return transaccion(async (tx) => {
     const { partidas } = await salidaEmitidaConPartidas(tx, salidaId);
     const partida = partidas.find((p) => p.id === partidaId);
     if (!partida) throw new ErrorNegocio("PARTIDA_NO_EXISTE", 404);
@@ -460,7 +462,7 @@ export async function editarSalidaOQC(
 ) {
   if (!cuerpo.motivoCorreccion?.trim()) throw new ErrorNegocio("MOTIVO_CORRECCION_REQUERIDO");
 
-  return db.$transaction(async (tx) => {
+  return transaccion(async (tx) => {
     const { salida } = await salidaEmitidaConPartidas(tx, id);
 
     const antes = {
@@ -533,7 +535,7 @@ export async function eliminarSalidaOQC(
   id: string,
   meta: { motivoCorreccion: string; usuarioId: string; usuarioNombre: string },
 ) {
-  return db.$transaction(async (tx) => {
+  return transaccion(async (tx) => {
     const { salida, partidas } = await salidaEmitidaConPartidas(tx, id);
 
     for (const partida of partidas) {
@@ -569,7 +571,7 @@ export async function registrarScrapOQC(
   cuerpo: CuerpoRegistroScrap,
   usuario: { id: string; nombre: string },
 ) {
-  return db.$transaction(async (tx) => {
+  return transaccion(async (tx) => {
     if (!cuerpo.productoId) throw new ErrorNegocio("PRODUCTO_REQUERIDO");
     if (!cuerpo.almacenId) throw new ErrorNegocio("ALMACEN_ORIGEN_REQUERIDO");
     if (!cuerpo.motivo?.trim()) throw new ErrorNegocio("MOTIVO_SCRAP_REQUERIDO");
@@ -579,7 +581,8 @@ export async function registrarScrapOQC(
     let cantidadScrap: Decimal;
     if (!cuerpo.conteo?.unidad) {
       const directa = aDecimal(cuerpo.cantidad);
-      if (!directa || !directa.isPositive()) throw new ErrorNegocio("QUANTIDAD_INVALIDA");
+      // > 0 estricto (Fase 3): isPositive() incluía el 0.
+      if (!esMayorQueCero(directa)) throw new ErrorNegocio("QUANTIDAD_INVALIDA");
       cantidadScrap = directa.abs();
     } else {
       // El conteo se resuelve de forma autoritativa dentro del registro
@@ -642,7 +645,7 @@ export async function corregirScrapOQC(
   },
   usuario: { id: string; nombre: string },
 ) {
-  return db.$transaction(async (tx) => {
+  return transaccion(async (tx) => {
     const registro = await tx.registroScrap.findUnique({ where: { id } });
     if (!registro) throw new ErrorNegocio("SCRAP_NO_EXISTE", 404);
     if (!registro.movimientoId) throw new ErrorNegocio("REGISTRO_HISTORICO", 409);
@@ -703,7 +706,7 @@ export async function eliminarScrapOQC(
   id: string,
   meta: { motivoCorreccion: string; usuarioId: string; usuarioNombre: string },
 ) {
-  return db.$transaction(async (tx) => {
+  return transaccion(async (tx) => {
     const registro = await tx.registroScrap.findUnique({ where: { id } });
     if (!registro) throw new ErrorNegocio("SCRAP_NO_EXISTE", 404);
     if (registro.movimientoId) {
@@ -729,10 +732,11 @@ export async function registrarRechazoOQC(
   cuerpo: CuerpoRegistroRechazo,
   usuario: { id: string; nombre: string },
 ) {
-  return db.$transaction(async (tx) => {
+  return transaccion(async (tx) => {
     if (!cuerpo.productoId) throw new ErrorNegocio("PRODUCTO_REQUERIDO");
     const cantidadDecimal = aDecimal(cuerpo.cantidad);
-    if (!cantidadDecimal || !cantidadDecimal.isPositive()) throw new ErrorNegocio("QUANTIDAD_INVALIDA");
+    // > 0 estricto (Fase 3): isPositive() incluía el 0.
+    if (!esMayorQueCero(cantidadDecimal)) throw new ErrorNegocio("QUANTIDAD_INVALIDA");
     const cantidad = cantidadDecimal.abs().toString();
     if (!cuerpo.motivo?.trim()) throw new ErrorNegocio("MOTIVO_RECHAZO_REQUERIDO");
 
@@ -794,7 +798,7 @@ export async function editarRechazoOQC(id: string, cuerpo: {
   notas?: string;
   responsable?: string;
 }) {
-  return db.$transaction(async (tx) => {
+  return transaccion(async (tx) => {
     const registro = await tx.registroRechazo.findUnique({ where: { id } });
     if (!registro) throw new ErrorNegocio("RECHAZO_NO_EXISTE", 404);
 
@@ -821,7 +825,8 @@ export async function editarRechazoOQC(id: string, cuerpo: {
     const cantidadDecimal = aDecimal(
       cuerpo.cantidad !== undefined ? cuerpo.cantidad : registro.cantidad,
     );
-    if (!cantidadDecimal || !cantidadDecimal.isPositive()) throw new ErrorNegocio("QUANTIDAD_INVALIDA");
+    // > 0 estricto (Fase 3): isPositive() incluía el 0.
+    if (!esMayorQueCero(cantidadDecimal)) throw new ErrorNegocio("QUANTIDAD_INVALIDA");
     const cantidad = cantidadDecimal.abs().toString();
 
     const disposicion =

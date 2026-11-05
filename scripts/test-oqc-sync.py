@@ -84,7 +84,9 @@ def stock(producto_id, almacen_id):
     r = cur.execute(
         "SELECT cantidad FROM Stock WHERE productoId=? AND almacenId=?",
         (producto_id, almacen_id)).fetchone()
-    return r[0] if r else 0.0
+    # Fase 1 (Decimal): SQLite devuelve las cantidades como str (TEXT);
+    # se coerce a float para la aritmética de las verificaciones.
+    return float(r[0]) if r else 0.0
 
 
 def mov_db(mov_id):

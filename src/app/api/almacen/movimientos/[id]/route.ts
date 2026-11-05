@@ -10,6 +10,7 @@
 
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { transaccion } from "@/lib/reintentos";
 import { aDecimal } from "@/lib/numerico";
 import { requerirPermiso } from "@/modulos/autenticacion/servicios/auth";
 import {
@@ -81,7 +82,7 @@ export async function PATCH(request: Request, { params }: Ctx) {
       return NextResponse.json({ error: "QUANTIDAD_INVALIDA" }, { status: 400 });
     }
 
-    const resultado = await db.$transaction((tx) =>
+    const resultado = await transaccion((tx) =>
       editarMovimientoTx(
         tx,
         id,
@@ -132,7 +133,7 @@ export async function DELETE(request: Request, { params }: Ctx) {
       return NextResponse.json({ error: "MOTIVO_CORRECCION_REQUERIDO" }, { status: 400 });
     }
 
-    const resultado = await db.$transaction((tx) =>
+    const resultado = await transaccion((tx) =>
       eliminarMovimientoTx(tx, id, {
         motivoCorreccion,
         usuarioId: usuario.id,

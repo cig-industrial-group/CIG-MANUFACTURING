@@ -10,6 +10,7 @@
 
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { transaccion } from "@/lib/reintentos";
 import { requerirPermiso } from "@/modulos/autenticacion/servicios/auth";
 import { ErrorNegocio } from "@/modulos/almacen/servicios/nucleo";
 import { DIAS_RESTAURACION, enviarParteAPapelera } from "@/modulos/papelera/servicios/nucleo";
@@ -57,7 +58,7 @@ export async function PATCH(request: Request, { params }: Ctx) {
       }
     }
 
-    const parte = await db.$transaction(async (tx) => {
+    const parte = await transaccion(async (tx) => {
       if (sincronizarModelos) {
         await tx.modeloParte.deleteMany({ where: { numeroParteId: id } });
         if (modelosIds.length > 0) {

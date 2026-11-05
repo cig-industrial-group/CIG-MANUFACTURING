@@ -294,6 +294,7 @@ el intento y deja punto de reversión.
 | `✖ No se encontró package.json/prisma/seed.ts` | Ejecutar desde la raíz del repositorio clonado. |
 | Servicio `failed` / en bucle | `journalctl -u cig-manufacturing -n 50` y `tail -50 …/logs/stderr.log`. Causas típicas: `AUTH_SECRET` inválido, o `HOSTNAME`/`PORT` heredados en `.env` que rompen el bind (eliminar esas líneas). |
 | `PrismaClientInitializationError: Unable to open DB file` | `DATABASE_URL` relativa o sin permisos: usar ruta absoluta y verificar escritura del usuario de servicio en `db/`. |
+| `SQLITE_BUSY` / `database is locked` en `logs/stdout.log` | Contención por un proceso externo (p. ej. `sqlite3` CLI de mantenimiento). La app ya la absorbe en dos capas: espera interna de 5 s (`busy_timeout`, Fase 2) y re-ejecución con retroceso (Fase 3). Avisos `[bd] error transitorio en intento n/N` ocasionales = normal. Si son frecuentes: mover el mantenimiento pesado a horas sin operación o usar `VACUUM INTO`/`.backup` (nunca escrituras largas sobre el archivo en caliente). |
 | HTTPS no responde (dominio) | 1) ¿Registro A apunta a esta IP? 2) ¿El token tiene `Zone·DNS·Edit` sobre esa zona? Ver `journalctl -u caddy -n 50`. El primer certificado tarda 1-3 min. |
 | `caddy validate` falla con token vacío | Revisar `/etc/caddy/caddy.env` (debe existir en modo dominio con `CLOUDFLARE_API_TOKEN=…`). |
 | No se puede entrar tras desplegar en local | HTTP sin TLS: la cookie requiere `COOKIE_INSEGURA_HTTP=1` — el `.env` en modo local ya la incluye; si se desplegó antes con otro `.env`, agregarla y reiniciar. |

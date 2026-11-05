@@ -45,6 +45,11 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD") or sys.exit(
 PRUEBAS = []
 
 
+
+def num(x):
+    """Fase 1 (Decimal): los numéricos viajan como texto JSON; se coercen."""
+    return float(x) if isinstance(x, (str, int, float)) else x
+
 def check(desc, esperado, obtenido):
     ok = esperado == obtenido
     PRUEBAS.append((desc, ok))
@@ -165,7 +170,7 @@ def pruebas():
 
     print("\n=== 2. Liberación de material de salida (vía OQC) ===")
     cod, inv = admin.req("GET", "/api/almacen/inventario")
-    con_stock = [f for f in inv if f["cantidad"] > 0]
+    con_stock = [f for f in inv if num(f["cantidad"]) > 0]
     if not con_stock:
         print("✘ No hay stock para probar; abortando")
         return 2
@@ -175,10 +180,10 @@ def pruebas():
     p1 = filas[0]
     p2 = filas[1] if len(filas) > 1 else None
 
-    cant1 = min(3.0, p1["cantidad"])
+    cant1 = min(3.0, num(p1["cantidad"]))
     lineas = [{"productoId": p1["productoId"], "cantidad": cant1}]
     if p2:
-        lineas.append({"productoId": p2["productoId"], "cantidad": min(2.0, p2["cantidad"])})
+        lineas.append({"productoId": p2["productoId"], "cantidad": min(2.0, num(p2["cantidad"]))})
 
     cod, resp = admin.req("POST", "/api/oqc/salidas", {
         "clienteId": c1["id"], "almacenOrigenId": almacen_id,
@@ -206,9 +211,9 @@ def pruebas():
 
     # El stock se descuenta exactamente
     cod, inv2 = admin.req("GET", "/api/almacen/inventario")
-    stock = {(f["productoId"], f["almacenId"]): f["cantidad"] for f in inv2}
+    stock = {(f["productoId"], f["almacenId"]): num(f["cantidad"]) for f in inv2}
     for linea in lineas:
-        antes = next(f["cantidad"] for f in inv if (f["productoId"], f["almacenId"]) == (linea["productoId"], almacen_id))
+        antes = next(num(f["cantidad"]) for f in inv if (f["productoId"], f["almacenId"]) == (linea["productoId"], almacen_id))
         despues = stock.get((linea["productoId"], almacen_id), 0)
         check(f"  stock de {linea['productoId'][:8]}… descontado {linea['cantidad']}",
               round(antes - linea["cantidad"], 6), round(despues, 6))
@@ -223,7 +228,7 @@ def pruebas():
     cod, inv3 = admin.req("GET", "/api/almacen/inventario")
     check("  stock intacto tras el rechazo (todo-o-nada)",
           round(stock.get((p1["productoId"], almacen_id), 0), 6),
-          round(next(f["cantidad"] for f in inv3 if (f["productoId"], f["almacenId"]) == (p1["productoId"], almacen_id)), 6))
+          round(next(num(f["cantidad"]) for f in inv3 if (f["productoId"], f["almacenId"]) == (p1["productoId"], almacen_id)), 6))
 
     # Partidas duplicadas del mismo producto se fusionan
     cod, resp = admin.req("POST", "/api/oqc/salidas", {
@@ -238,7 +243,7 @@ def pruebas():
     movs2 = resp.get("salida", {}).get("partidas", [])
     check("  partidas duplicadas fusionadas en 1 movimiento", 1, len(movs2))
     if movs2:
-        check("  cantidad fusionada = 3", 3, movs2[0]["cantidad"])
+        check("  cantidad fusionada = 3", 3, num(movs2[0]["cantidad"]))
 
     print("\n=== 3. Reglas de negocio de la liberación ===")
     admin.req("PATCH", f"/api/clientes/{c2['id']}", {"activo": False})
