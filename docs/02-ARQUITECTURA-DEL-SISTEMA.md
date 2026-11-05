@@ -1,6 +1,6 @@
 # 02 — Arquitectura del Sistema
 
-> **Proyecto:** CIG-MANUFACTURING · **Versión documentada:** 1.0.0 · **Rama:** `main`
+> **Proyecto:** CIG-MANUFACTURING · **Versión documentada:** 1.1.0 · **Rama:** `main`
 > Suite de documentación arquitectónica — Parte 2 de 6.
 
 ---

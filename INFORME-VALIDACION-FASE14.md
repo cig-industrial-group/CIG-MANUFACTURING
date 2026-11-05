@@ -1,7 +1,7 @@
 # FASE 14 — Informe de Validación
 ## Módulo de Branding (Identidad Visual)
 
-**Proyecto:** CIG-MANUFACTURING · **Versión auditada:** 1.0.0
+**Proyecto:** CIG-MANUFACTURING · **Versión auditada:** 1.1.0
 **Rama de trabajo:** `feat/branding-ajustes` (creada desde `main`)
 **Fecha de validación:** 2026-11-05
 **Método:** verificación ejecutada contra el sistema real (build de producción + servidor standalone + APIs + navegador), pruebas E2E automatizadas (`scripts/test-branding.py`, 58 verificaciones) y réplica completa del pipeline de CI (`bash scripts/simulacion-ci.sh`, 9/9 pasos). Cada afirmación de este informe se comprobó contra el código y el sistema en ejecución; ninguna se infiere.

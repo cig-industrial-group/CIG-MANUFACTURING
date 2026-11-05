@@ -1,6 +1,6 @@
 # 03 — Guía de Desarrollo: Nuevos Módulos
 
-> **Proyecto:** CIG-MANUFACTURING · **Versión documentada:** 1.0.0 · **Rama:** `main`
+> **Proyecto:** CIG-MANUFACTURING · **Versión documentada:** 1.1.0 · **Rama:** `main`
 > Suite de documentación arquitectónica — Parte 3 de 6.
 >
 > **Ejemplo maestro:** módulo **Proveedores** (catálogo de proveedores de materia prima).

@@ -8,7 +8,7 @@
 # ============================================================================
 
 # ============================================================
-# CIG-MANUFACTURING — Instalador automatizado de despliegue
+# CIG-MANUFACTURING v1.1.0 — Instalador automatizado de despliegue
 # para producción con aislamiento de seguridad extremo.
 #
 # QUÉ HACE (Ubuntu 22.04 LTS virgen → producción):
@@ -623,7 +623,7 @@ escribir_unit_app() {
 
   cat > "${destino}" <<EOF
 # ============================================================
-# CIG-MANUFACTURING — Servicio de producción (systemd)
+# CIG-MANUFACTURING v1.1.0 — Servicio de producción (systemd)
 # Generado por deploy.sh — NO editar a mano (se regenera).
 #
 # AISLAMIENTO: el proceso solo puede escribir en db/, logs/, branding/
@@ -978,7 +978,7 @@ resumen_final() {
 # ------------------------------------------------------------------ MAIN
 main() {
   printf '%s\n' "=============================================================="
-  printf '%s\n' "  CIG-MANUFACTURING — Despliegue de producción seguro"
+  printf '%s\n' "  CIG-MANUFACTURING v1.1.0 — Despliegue de producción seguro"
   printf '%s\n\n' "=============================================================="
 
   verificar_precondiciones
