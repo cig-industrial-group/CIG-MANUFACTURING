@@ -38,11 +38,13 @@ RUN bunx prisma generate && bun run build
 RUN bun install --frozen-lockfile --production
 
 # 5) Configuración de ejecución
-#    La BD vive en el volumen /data para persistir entre contenedores
+#    La BD vive en el volumen /data para persistir entre contenedores.
+#    connection_limit=1 (Fase 2): pool de UNA conexión SQLite; la app
+#    lo fuerza igualmente por código al arrancar (defensa en profundidad).
 ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     PORT=3000 \
-    DATABASE_URL=file:/data/cig-manufacturing.db
+    DATABASE_URL=file:/data/cig-manufacturing.db?connection_limit=1
 
 # Volumen de datos con propiedad del usuario sin privilegios: los
 # volúmenes nombrados NUEVOS heredan estos permisos en su primer uso.

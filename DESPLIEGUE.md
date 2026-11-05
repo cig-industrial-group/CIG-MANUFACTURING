@@ -65,8 +65,10 @@ nano .env
 Edita `.env`:
 
 ```ini
-# RUTA ABSOLUTA al archivo de la base de datos en TU servidor
-DATABASE_URL=file:/opt/cig-manufacturing/db/custom.db
+# RUTA ABSOLUTA al archivo de la base de datos en TU servidor.
+# connection_limit=1 (remediación Fase 2): pool de UNA conexión SQLite;
+# la app también lo fuerza por código al arrancar. WAL se activa solo.
+DATABASE_URL=file:/opt/cig-manufacturing/db/custom.db?connection_limit=1
 
 # Clave aleatoria para firmar sesiones (genera la tuya):
 #   openssl rand -hex 32

@@ -31,7 +31,7 @@ export AUTH_SECRET="${AUTH_SECRET:-a9f3c1d85e7b24608f4a2c9e6b1d73580e4c2f9a5b8d3
 export ADMIN_PASSWORD="${ADMIN_PASSWORD:-Pruebas*2026}"
 DIR_TMP="$(mktemp -d)"
 PID_SERVIDOR=""
-export DATABASE_URL="file:${DIR_TMP}/cig-ci.db"
+export DATABASE_URL="file:${DIR_TMP}/cig-ci.db?connection_limit=1"
 export NEXT_TELEMETRY_DISABLED=1
 
 limpiar() {

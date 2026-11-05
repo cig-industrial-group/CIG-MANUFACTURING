@@ -29,7 +29,9 @@ services:
       # ⚠ Obligatorio. Sin fallback: compose falla si falta.
       #    Genera tu clave:  openssl rand -hex 32
       AUTH_SECRET: "${AUTH_SECRET:?AUTH_SECRET no definido — generalo con: openssl rand -hex 32}"
-      DATABASE_URL: file:/data/cig-manufacturing.db
+      # connection_limit=1 (Fase 2): pool de una conexión SQLite; la app
+      # también lo fuerza por código al arrancar (defensa en profundidad).
+      DATABASE_URL: file:/data/cig-manufacturing.db?connection_limit=1
       NODE_ENV: production
       # Contraseña del ADMIN inicial (opcional, solo primera instalación):
       # ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
