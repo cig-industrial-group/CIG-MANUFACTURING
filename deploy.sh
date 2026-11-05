@@ -518,7 +518,7 @@ sincronizar_codigo() {
     --exclude='db/' \
     --exclude='logs/' \
     --exclude='backups/' \
-    --exclude='branding/' \
+    --exclude='/branding/'  \
     --exclude='.env' \
     --exclude='server.log' \
     --exclude='dev.log' \
