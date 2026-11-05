@@ -479,7 +479,9 @@ export async function enviarProveedorAPapelera(
   usuario: { id: string; nombre: string },
 ) {
   // 1. Cargar el proveedor (404 PROVEEDOR_NO_EXISTE si no existe).
-  // 2. Dentro de db.$transaction:
+  // 2. Dentro de transaccion() (src/lib/reintentos.ts — Fase 3:
+  //    transacción interactiva con reintentos ante cerrojos externos;
+  //    NUNCA db.$transaction directo):
   //    a) crear Papelera { entidad: "PROVEEDOR", entidadId, identificador: codigo,
   //       nombre, datos: JSON del registro, estado: "EN_PAPELERA", usuarioId,
   //       usuarioNombre, eliminadoEn, expiraEn: +30 días };

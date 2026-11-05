@@ -34,7 +34,7 @@
  * unidades estándar de fábrica listas para ajustarse.
  */
 import { db } from "@/lib/db";
-import { CERO, type Decimal, aDecimal, desdeBD } from "@/lib/numerico";
+import { CERO, type Decimal, aDecimal, desdeBD, esMayorQueCero } from "@/lib/numerico";
 import { ErrorNegocio } from "@/modulos/almacen/servicios/nucleo";
 import type { ParteConteo, TipoUnidad, Unidad, CuerpoUnidad } from "../tipos";
 import { TIPOS_UNIDAD, TIPOS_UNIDAD_BASE } from "../tipos";
@@ -361,7 +361,9 @@ export async function validarEmpaqueProducto(
   }
 
   const contenido = aDecimal(crudo.contenidoPaquete);
-  if (!contenido || !contenido.isPositive()) {
+  // Corrección Fase 3: el contenido debe ser > 0 — isPositive() de
+  // decimal.js incluye el cero y dejaba pasar empaques «1 PAQ = 0 PZA».
+  if (!esMayorQueCero(contenido)) {
     throw new ErrorNegocio("PAQUETE_CONTENIDO_INVALIDO", 400);
   }
 
@@ -443,7 +445,8 @@ export async function resolverConteoTx(
   // ===== Captura directa en la unidad base del producto =====
   if (codigoCaptura === producto.unidad) {
     if (!paquetes.isZero()) throw new ErrorNegocio("CONTEO_UNIDAD_INVALIDA");
-    if (!sueltas.isPositive()) throw new ErrorNegocio("CONTEO_INVALIDO");
+    // > 0 estricto (Fase 3): la captura directa de 0 unidades es inválida.
+    if (!esMayorQueCero(sueltas)) throw new ErrorNegocio("CONTEO_INVALIDO");
     return {
       cantidad: sueltas,
       partes: [
@@ -473,16 +476,21 @@ export async function resolverConteoTx(
   if (unidad.unidadBase !== producto.unidad) throw new ErrorNegocio("CONTEO_UNIDAD_INCOMPATIBLE");
 
   const contenido = aDecimal(producto.contenidoPaquete);
-  if (!contenido || !contenido.isPositive()) {
+  // > 0 estricto (Fase 3): un empaque con contenido 0 no puede usarse
+  // para capturar en paquetes (0 × N = 0 unidades).
+  if (!esMayorQueCero(contenido)) {
     throw new ErrorNegocio("CONTEO_UNIDAD_INVALIDA");
   }
 
   // Aritmética EXACTA: cantidad = paquetes × contenido + sueltas (unidad base)
   const cantidad = paquetes.times(contenido).plus(sueltas);
-  if (!cantidad.isPositive()) throw new ErrorNegocio("CONTEO_INVALIDO");
+  // > 0 estricto (Fase 3): un conteo total de 0 unidades es inválido.
+  if (!esMayorQueCero(cantidad)) throw new ErrorNegocio("CONTEO_INVALIDO");
 
   const partes: ParteConteo[] = [];
-  if (paquetes.isPositive()) {
+  // > 0 estricto (Fase 3): las filas en 0 no se listan (semántica de la
+  // era float: «2 PAQ + 0 sueltas» muestra solo la fila de PAQ).
+  if (esMayorQueCero(paquetes)) {
     partes.push({
       unidad: unidad.codigo,
       nombre: unidad.nombre,
@@ -490,7 +498,7 @@ export async function resolverConteoTx(
       cantidad: paquetes.toString(),
     });
   }
-  if (sueltas.isPositive()) {
+  if (esMayorQueCero(sueltas)) {
     partes.push({
       unidad: producto.unidad,
       nombre: base?.nombre ?? producto.unidad,
@@ -530,7 +538,7 @@ export function fusionarPartesConteo(partes: ParteConteo[]): { partes: ParteCont
     desdeBD(String(b.factor), "ParteConteo.factor").cmp(desdeBD(String(a.factor), "ParteConteo.factor")),
   );
   return {
-    partes: lista.filter((p) => desdeBD(String(p.cantidad), "ParteConteo.cantidad").isPositive()),
+    partes: lista.filter((p) => esMayorQueCero(desdeBD(String(p.cantidad), "ParteConteo.cantidad"))),
     cantidad,
   };
 }

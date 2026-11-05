@@ -47,7 +47,14 @@
  *     escritura de procesos EXTERNOS (mantenimiento con sqlite3 CLI,
  *     despliegue): el motor espera hasta 5 s internamente en lugar de
  *     devolver SQLITE_BUSY de inmediato. Complementa (no sustituye) al
- *     envoltorio de reintentos de la Fase 3.
+ *     envoltorio de reintentos de la Fase 3 (src/lib/reintentos.ts):
+ *     los cerrojos que EXCEDEN estos 5 s se absorben re-ejecutando la
+ *     operación completa con retroceso exponencial acotado.
+ *
+ * Defensa en profundidad de la capa de datos (Fases 2+3):
+ *   pool=1 (cola interna) → WAL (lectores externos no bloquean) →
+ *   busy_timeout=5 s (espera interna del motor) → reintentos con
+ *   retroceso (src/lib/reintentos.ts, para bloqueos más largos).
  *
  * Decisiones explícitas (lo que NO se toca y por qué):
  *  · `PRAGMA synchronous` — permanece FULL (valor por defecto). En WAL,

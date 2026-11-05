@@ -21,6 +21,7 @@
  * se restaura con el mismo id.
  */
 import { db } from "@/lib/db";
+import { transaccion } from "@/lib/reintentos";
 import { aDecimal } from "@/lib/numerico";
 import { ErrorNegocio } from "@/modulos/almacen/servicios/nucleo";
 import { sanearEmpaqueProducto } from "@/modulos/unidades/servicios/nucleo";
@@ -72,7 +73,7 @@ async function registrarEnPapeleraTx(
 
 /** Producto → papelera. Incluye snapshot de su stock por almacén. */
 export async function enviarProductoAPapelera(id: string, usuario: UsuarioAccion) {
-  await db.$transaction(async (tx) => {
+  await transaccion(async (tx) => {
     const producto = await tx.producto.findUnique({ where: { id }, include: { stocks: true } });
     if (!producto) throw new ErrorNegocio("NO_ENCONTRADO", 404);
 
@@ -96,7 +97,7 @@ export async function enviarProductoAPapelera(id: string, usuario: UsuarioAccion
 
 /** Almacén → papelera. Incluye snapshot de su stock por producto. */
 export async function enviarAlmacenAPapelera(id: string, usuario: UsuarioAccion) {
-  await db.$transaction(async (tx) => {
+  await transaccion(async (tx) => {
     const almacen = await tx.almacen.findUnique({ where: { id }, include: { stocks: true } });
     if (!almacen) throw new ErrorNegocio("NO_ENCONTRADO", 404);
 
@@ -119,7 +120,7 @@ export async function enviarAlmacenAPapelera(id: string, usuario: UsuarioAccion)
 
 /** Modelo → papelera. Incluye sus números de parte asociados. */
 export async function enviarModeloAPapelera(id: string, usuario: UsuarioAccion) {
-  await db.$transaction(async (tx) => {
+  await transaccion(async (tx) => {
     const modelo = await tx.modelo.findUnique({
       where: { id },
       include: { partes: { include: { numeroParte: true } } },
@@ -146,7 +147,7 @@ export async function enviarModeloAPapelera(id: string, usuario: UsuarioAccion) 
 
 /** Número de parte → papelera. Incluye sus modelos asociados. */
 export async function enviarParteAPapelera(id: string, usuario: UsuarioAccion) {
-  await db.$transaction(async (tx) => {
+  await transaccion(async (tx) => {
     const parte = await tx.numeroParte.findUnique({
       where: { id },
       include: { modelos: { include: { modelo: true } } },
@@ -173,7 +174,7 @@ export async function enviarParteAPapelera(id: string, usuario: UsuarioAccion) {
 /** Usuario → papelera. Conserva su hash de contraseña para que pueda
  *  volver a iniciar sesión tal cual al restaurarse. */
 export async function enviarUsuarioAPapelera(id: string, usuario: UsuarioAccion) {
-  await db.$transaction(async (tx) => {
+  await transaccion(async (tx) => {
     const objetivo = await tx.usuario.findUnique({ where: { id }, include: { rol: true } });
     if (!objetivo) throw new ErrorNegocio("NO_ENCONTRADO", 404);
 
@@ -196,7 +197,7 @@ export async function enviarUsuarioAPapelera(id: string, usuario: UsuarioAccion)
  *  clienteCodigo/clienteNombre) sobrevive intacto y queda marcado como
  *  «eliminado» hasta que el cliente se restaure con el mismo id. */
 export async function enviarClienteAPapelera(id: string, usuario: UsuarioAccion) {
-  await db.$transaction(async (tx) => {
+  await transaccion(async (tx) => {
     const cliente = await tx.cliente.findUnique({ where: { id } });
     if (!cliente) throw new ErrorNegocio("NO_ENCONTRADO", 404);
 
@@ -436,7 +437,7 @@ async function restaurarClienteTx(tx: PrismaTx, datos: DatosPapelera) {
 
 /** Restaura un registro desde la papelera (mismo id → re-vinculado). */
 export async function restaurarDePapelera(idPapelera: string, usuario: UsuarioAccion) {
-  return db.$transaction(async (tx) => {
+  return transaccion(async (tx) => {
     const entrada = await tx.papelera.findUnique({ where: { id: idPapelera } });
     if (!entrada) throw new ErrorNegocio("PAPELERA_NO_EXISTE", 404);
     if (entrada.estado !== "EN_PAPELERA") throw new ErrorNegocio("PAPELERA_YA_PROCESADA", 409);

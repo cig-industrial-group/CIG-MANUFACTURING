@@ -9,9 +9,20 @@
  */
 
 import type { NextConfig } from "next";
+import { fileURLToPath } from "url";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  /*
+   * Raíz de trazado EXPLÍCITA (corrección técnica, Fase 3): Next infiere
+   * la raíz buscando lockfiles hacia ARRIBA; si existe uno ajeno fuera del
+   * proyecto (p. ej. ~/package-lock.json en la máquina que compila), el
+   * output standalone queda anidado (.next/standalone/<camino>/server.js)
+   * y el despliegue/CI, que esperan .next/standalone/server.js, se rompen.
+   * Fijarla al directorio del proyecto hace el build determinista en
+   * cualquier entorno (local, CI, Docker).
+   */
+  outputFileTracingRoot: fileURLToPath(new URL(".", import.meta.url)),
   /* config options here */
   reactStrictMode: false,
 };

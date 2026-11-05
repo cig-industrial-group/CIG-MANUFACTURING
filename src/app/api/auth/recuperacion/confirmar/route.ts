@@ -11,6 +11,7 @@
 import { createHash } from "crypto";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { transaccion } from "@/lib/reintentos";
 import {
   conCookieSesion,
   crearTokenSesion,
@@ -80,19 +81,25 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "CODIGO_EXPIRADO" }, { status: 400 });
     }
 
-    await db.$transaction([
-      db.restablecimiento.update({
+    // Forma de callback (Fase 3): la forma de arreglo de $transaction no
+    // puede re-ejecutarse en un reintento (las promesas ya fueron creadas),
+    // y este par de escrituras — marcar el código como usado y cambiar la
+    // contraseña — es exactamente la unidad atómica que el envoltorio de
+    // reintentos debe poder re-ejecutar completa si un cerrojo externo
+    // interrumpe la transacción.
+    await transaccion(async (tx) => {
+      await tx.restablecimiento.update({
         where: { id: registro.id },
         data: { usadoEn: new Date() },
-      }),
-      db.usuario.update({
+      });
+      await tx.usuario.update({
         where: { id: usuario.id },
         data: {
           passwordHash: await hashearPassword(password),
           debeCambiarPassword: false,
         },
-      }),
-    ]);
+      });
+    });
 
     // Iniciar sesión automáticamente tras restablecer
     const token = await crearTokenSesion(usuario.id);

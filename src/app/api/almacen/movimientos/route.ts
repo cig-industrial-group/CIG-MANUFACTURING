@@ -10,6 +10,7 @@
 
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { transaccion } from "@/lib/reintentos";
 import { requerirPermiso } from "@/modulos/autenticacion/servicios/auth";
 import {
   ErrorNegocio,
@@ -132,7 +133,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "QUANTIDAD_INVALIDA" }, { status: 400 });
     }
 
-    const resultado = await db.$transaction((tx) =>
+    const resultado = await transaccion((tx) =>
       registrarMovimientoTx(tx, {
         tipo,
         productoId: String(cuerpo.productoId),
