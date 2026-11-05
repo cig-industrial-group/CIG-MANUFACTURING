@@ -10,6 +10,7 @@
 
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { CERO, type Decimal, desdeBD, multiplicar } from "@/lib/numerico";
 import { requerirPermiso } from "@/modulos/autenticacion/servicios/auth";
 import { productosVivos } from "@/modulos/almacen/servicios/nucleo";
 
@@ -22,7 +23,8 @@ export async function GET(request: Request) {
     db.producto.count({ where: { activo: true } }),
     db.almacen.count({ where: { activo: true } }),
     db.stock.findMany({
-      where: { cantidad: { gt: 0 } },
+      // El filtro «cantidad > 0» se aplica en la capa de aplicación con
+      // comparación Decimal exacta (el SQL no compara texto decimal)
       select: {
         cantidad: true,
         almacenId: true,
@@ -38,45 +40,59 @@ export async function GET(request: Request) {
     }),
   ]);
 
-  // ===== Agregados de stock =====
-  let unidadesStock = 0;
-  let valorInventario = 0;
-  const stockPorProducto = new Map<string, { unidades: number; producto: (typeof stocks)[0]["producto"] }>();
-  const porAlmacen = new Map<string, { codigo: string; nombre: string; unidades: number; valor: number }>();
+  // ===== Agregados de stock (suma Decimal EXACTA; prohibido float) =====
+  let unidadesStock: Decimal = CERO;
+  let valorInventario: Decimal = CERO;
+  const stockPorProducto = new Map<string, { unidades: Decimal; producto: (typeof stocks)[0]["producto"] }>();
+  const porAlmacen = new Map<string, { codigo: string; nombre: string; unidades: Decimal; valor: Decimal }>();
 
   for (const s of stocks) {
-    unidadesStock += s.cantidad;
-    valorInventario += s.cantidad * (s.producto.costoUnitario ?? 0);
+    const cantidad = desdeBD(s.cantidad, "Stock.cantidad");
+    if (!cantidad.isPositive()) continue;
+    const costo = s.producto.costoUnitario
+      ? desdeBD(s.producto.costoUnitario, "Producto.costoUnitario")
+      : CERO;
+
+    unidadesStock = unidadesStock.plus(cantidad);
+    valorInventario = valorInventario.plus(multiplicar(cantidad, costo));
 
     const agg = stockPorProducto.get(s.producto.sku);
-    if (agg) agg.unidades += s.cantidad;
-    else stockPorProducto.set(s.producto.sku, { unidades: s.cantidad, producto: s.producto });
+    if (agg) agg.unidades = agg.unidades.plus(cantidad);
+    else stockPorProducto.set(s.producto.sku, { unidades: cantidad, producto: s.producto });
 
     if (s.almacen.activo) {
       const aggA = porAlmacen.get(s.almacenId) ?? {
         codigo: s.almacen.codigo,
         nombre: s.almacen.nombre,
-        unidades: 0,
-        valor: 0,
+        unidades: CERO,
+        valor: CERO,
       };
-      aggA.unidades += s.cantidad;
-      aggA.valor += s.cantidad * (s.producto.costoUnitario ?? 0);
+      aggA.unidades = aggA.unidades.plus(cantidad);
+      aggA.valor = aggA.valor.plus(multiplicar(cantidad, costo));
       porAlmacen.set(s.almacenId, aggA);
     }
   }
 
   // ===== Productos con stock bajo o cerca del mínimo =====
   const stockBajo = [...stockPorProducto.entries()]
-    .filter(([, v]) => v.producto.activo && v.unidades < v.producto.stockMinimo * 1.1 && v.producto.stockMinimo > 0)
+    .filter(([, v]) => {
+      const minimo = desdeBD(v.producto.stockMinimo, "Producto.stockMinimo");
+      return v.producto.activo && minimo.isPositive() && v.unidades.lt(multiplicar(minimo, "1.1"));
+    })
     .map(([sku, v]) => ({
       id: sku,
       sku,
       nombre: v.producto.nombre,
       unidad: v.producto.unidad,
-      stockTotal: v.unidades,
+      stockTotal: v.unidades.toString(),
       stockMinimo: v.producto.stockMinimo,
     }))
-    .sort((a, b) => a.stockTotal / a.stockMinimo - b.stockTotal / b.stockMinimo)
+    .sort((a, b) =>
+      // Razón stockTotal/stockMinimo con división Decimal (solo ordena la presentación)
+      desdeBD(a.stockTotal, "stockTotal")
+        .div(desdeBD(a.stockMinimo, "stockMinimo"))
+        .cmp(desdeBD(b.stockTotal, "stockTotal").div(desdeBD(b.stockMinimo, "stockMinimo"))),
+    )
     .slice(0, 8);
 
   // ===== Serie de actividad últimos 14 días =====
@@ -113,14 +129,15 @@ export async function GET(request: Request) {
     const idx = indiceDia.get(clave);
     if (idx !== undefined) {
       // Conteo de movimientos (las unidades mezclan kg/pza/m, no son sumables)
+      const cantidad = desdeBD(m.cantidad, "Movimiento.cantidad");
       if (
         m.tipo === "ENTRADA" ||
         m.tipo === "RECEPCION" ||
-        (m.tipo === "AJUSTE" && m.cantidad > 0)
+        (m.tipo === "AJUSTE" && cantidad.isPositive())
       ) {
         dias[idx].entradas += 1;
       }
-      if (m.tipo === "SALIDA" || (m.tipo === "AJUSTE" && m.cantidad < 0)) {
+      if (m.tipo === "SALIDA" || (m.tipo === "AJUSTE" && cantidad.isNeg())) {
         dias[idx].salidas += 1;
       }
     }
@@ -156,12 +173,14 @@ export async function GET(request: Request) {
   return NextResponse.json({
     productosActivos,
     almacenesActivos,
-    unidadesStock,
-    valorInventario,
+    unidadesStock: unidadesStock.toString(),
+    valorInventario: valorInventario.toString(),
     movimientos7Dias,
     stockBajo,
     serieActividad: dias,
-    distribucionAlmacenes: [...porAlmacen.values()].sort((a, b) => b.valor - a.valor),
+    distribucionAlmacenes: [...porAlmacen.values()]
+      .sort((a, b) => b.valor.cmp(a.valor))
+      .map((d) => ({ ...d, unidades: d.unidades.toString(), valor: d.valor.toString() })),
     movimientosRecientes,
   });
 }

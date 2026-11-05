@@ -117,23 +117,27 @@ export function useIdioma(): CtxIdioma {
   return ctx;
 }
 
-/** Formateadores localizados de números, moneda y fechas */
+/** Formateadores localizados de números, moneda y fechas.
+ *  Aceptan `number | string`: los decimales del dominio viajan como texto
+ *  exacto (remediación Fase 1) y aquí se convierten SOLO para presentar
+ *  (la conversión a float está confinada a la capa de presentación;
+ *  el dominio y la persistencia jamás usan float). */
 export function useFormateadores() {
   const { locale } = useIdioma();
   return useMemo(
     () => ({
-      numero: (n: number, decimales = 2) =>
+      numero: (n: number | string, decimales = 2) =>
         new Intl.NumberFormat(locale, {
           minimumFractionDigits: 0,
           maximumFractionDigits: decimales,
-        }).format(n),
-      entero: (n: number) => new Intl.NumberFormat(locale).format(n),
-      moneda: (n: number) =>
+        }).format(Number(n)),
+      entero: (n: number | string) => new Intl.NumberFormat(locale).format(Number(n)),
+      moneda: (n: number | string) =>
         new Intl.NumberFormat(locale, {
           style: "currency",
           currency: "MXN",
           maximumFractionDigits: 2,
-        }).format(n),
+        }).format(Number(n)),
       fecha: (iso: string | Date) =>
         new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(new Date(iso)),
       fechaHora: (iso: string | Date) =>

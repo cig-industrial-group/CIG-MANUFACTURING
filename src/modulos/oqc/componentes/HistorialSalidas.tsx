@@ -53,7 +53,7 @@ import {
 } from "../servicios/consultas";
 import { ErrorApi } from "../servicios/api";
 import { claveErrorApi } from "../servicios/errores";
-import { textoConteo } from "@/modulos/unidades/tipos";
+import { aTextoDecimal, esDecimalPositivo, textoConteo } from "@/modulos/unidades/tipos";
 import type { CuerpoEdicionPartida, CuerpoEdicionSalida, PartidaSalida, SalidaOQC } from "../tipos";
 import { detalleSalida } from "../servicios/api";
 import { useQuery } from "@tanstack/react-query";
@@ -514,14 +514,15 @@ function DialogoCorregirPartida({
 }) {
   const { t } = useIdioma();
   const [productoId, setProductoId] = useState(partida.productoId);
-  const [cantidad, setCantidad] = useState(String(partida.cantidad));
+  const [cantidad, setCantidad] = useState(partida.cantidad);
   const [motivo, setMotivo] = useState(partida.motivo ?? "");
   const [motivoCorreccion, setMotivoCorreccion] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   async function confirmar() {
-    const cant = Number(cantidad);
-    if (!productoId || !Number.isFinite(cant) || cant <= 0) {
+    // Validación decimal exacta del lado cliente (el servidor revalida)
+    const cant = aTextoDecimal(cantidad);
+    if (!productoId || cant === null || !esDecimalPositivo(cant)) {
       setError(t("comun.camposIncompletos"));
       return;
     }

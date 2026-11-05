@@ -10,6 +10,7 @@
 
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { aDecimal } from "@/lib/numerico";
 import { requerirPermiso } from "@/modulos/autenticacion/servicios/auth";
 import {
   ErrorNegocio,
@@ -74,6 +75,11 @@ export async function PATCH(request: Request, { params }: Ctx) {
     if (!cuerpo.motivoCorreccion?.trim()) {
       return NextResponse.json({ error: "MOTIVO_CORRECCION_REQUERIDO" }, { status: 400 });
     }
+    // Validación decimal exacta (fail-closed): sin coerción silenciosa
+    const cantidad = aDecimal(cuerpo.cantidad);
+    if (!cantidad) {
+      return NextResponse.json({ error: "QUANTIDAD_INVALIDA" }, { status: 400 });
+    }
 
     const resultado = await db.$transaction((tx) =>
       editarMovimientoTx(
@@ -83,7 +89,7 @@ export async function PATCH(request: Request, { params }: Ctx) {
           productoId: String(cuerpo.productoId),
           almacenOrigenId: cuerpo.almacenOrigenId || undefined,
           almacenDestinoId: cuerpo.almacenDestinoId || undefined,
-          cantidad: Number(cuerpo.cantidad),
+          cantidad,
           motivo: cuerpo.motivo,
           referencia: cuerpo.referencia,
           responsable: cuerpo.responsable,

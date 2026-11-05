@@ -10,6 +10,7 @@
 
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { aDecimal, sumar } from "@/lib/numerico";
 import { requerirPermiso } from "@/modulos/autenticacion/servicios/auth";
 import { ErrorNegocio } from "@/modulos/almacen/servicios/nucleo";
 import { DIAS_RESTAURACION, enviarProductoAPapelera } from "@/modulos/papelera/servicios/nucleo";
@@ -63,7 +64,7 @@ export async function PATCH(request: Request, { params }: Ctx) {
     // se valida contra la unidad final; si la unidad base cambia y el
     // empaque vigente deja de ser compatible, se retira automáticamente
     // (p. ej. pasar de PZA a KG invalida un empaque PAQ→PZA).
-    let empaque: { unidadPaquete: string | null; contenidoPaquete: number | null } | undefined;
+    let empaque: { unidadPaquete: string | null; contenidoPaquete: string | null } | undefined;
     if (cuerpo.unidadPaquete !== undefined || cuerpo.contenidoPaquete !== undefined) {
       try {
         empaque = await validarEmpaqueProducto(unidadFinal, {
@@ -85,6 +86,16 @@ export async function PATCH(request: Request, { params }: Ctx) {
       });
     }
 
+    // Validación decimal exacta (fail-closed): valores inválidos se rechazan
+    const stockMinimoNuevo =
+      cuerpo.stockMinimo !== undefined ? aDecimal(cuerpo.stockMinimo) : undefined;
+    const costoUnitarioNuevo =
+      cuerpo.costoUnitario === null || cuerpo.costoUnitario === ""
+        ? null
+        : cuerpo.costoUnitario !== undefined
+          ? aDecimal(cuerpo.costoUnitario)
+          : undefined;
+
     const producto = await db.producto.update({
       where: { id },
       data: {
@@ -100,23 +111,25 @@ export async function PATCH(request: Request, { params }: Ctx) {
           unidadPaquete: empaque.unidadPaquete,
           contenidoPaquete: empaque.contenidoPaquete,
         }),
-        ...(cuerpo.stockMinimo !== undefined &&
-          Number.isFinite(Number(cuerpo.stockMinimo)) && { stockMinimo: Number(cuerpo.stockMinimo) }),
-        ...(cuerpo.costoUnitario !== undefined && {
+        ...(stockMinimoNuevo !== undefined &&
+          stockMinimoNuevo !== null && { stockMinimo: stockMinimoNuevo.toString() }),
+        ...(costoUnitarioNuevo !== undefined && {
           costoUnitario:
-            cuerpo.costoUnitario === null || cuerpo.costoUnitario === ""
-              ? null
-              : Number(cuerpo.costoUnitario) >= 0
-                ? Number(cuerpo.costoUnitario)
-                : null,
+            costoUnitarioNuevo && !costoUnitarioNuevo.isNeg()
+              ? costoUnitarioNuevo.toString()
+              : null,
         }),
         ...(cuerpo.activo !== undefined && { activo: Boolean(cuerpo.activo) }),
       },
     });
 
-    const stockTotal =
-      (await db.stock.aggregate({ where: { productoId: id }, _sum: { cantidad: true } }))._sum
-        .cantidad ?? 0;
+    // Suma Decimal exacta en la capa de aplicación (agregado _sum no
+    // aplica a texto decimal; prohibido float en agregados de inventario)
+    const stocksDelProducto = await db.stock.findMany({
+      where: { productoId: id },
+      select: { cantidad: true },
+    });
+    const stockTotal = sumar(stocksDelProducto.map((s) => s.cantidad)).toString();
 
     return NextResponse.json({
       ...producto,

@@ -37,7 +37,8 @@ export async function POST(request: Request) {
         productoId: String(cuerpo.productoId ?? ""),
         clienteId: cuerpo.clienteId || undefined,
         salidaId: cuerpo.salidaId || undefined,
-        cantidad: Number(cuerpo.cantidad),
+        // Decimal como texto: la validación exacta la hace el núcleo (fail-closed)
+        cantidad: String(cuerpo.cantidad ?? ""),
         motivo: String(cuerpo.motivo ?? ""),
         disposicion: cuerpo.disposicion,
         notas: cuerpo.notas,

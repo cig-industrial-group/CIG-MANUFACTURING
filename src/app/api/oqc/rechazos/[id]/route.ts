@@ -26,7 +26,7 @@ export async function PATCH(request: Request, { params }: Ctx) {
     const registro = await editarRechazoOQC(id, {
       productoId: cuerpo.productoId,
       clienteId: cuerpo.clienteId !== undefined ? cuerpo.clienteId : undefined,
-      cantidad: cuerpo.cantidad !== undefined ? Number(cuerpo.cantidad) : undefined,
+      cantidad: cuerpo.cantidad !== undefined ? String(cuerpo.cantidad) : undefined,
       motivo: cuerpo.motivo,
       disposicion: cuerpo.disposicion,
       notas: cuerpo.notas,

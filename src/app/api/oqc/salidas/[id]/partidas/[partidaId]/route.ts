@@ -40,7 +40,8 @@ export async function PATCH(request: Request, { params }: Ctx) {
       {
         productoId: String(cuerpo.productoId),
         almacenOrigenId: cuerpo.almacenOrigenId || undefined,
-        cantidad: Number(cuerpo.cantidad),
+        // Decimal como texto: la validación exacta la hace el núcleo (fail-closed)
+        cantidad: String(cuerpo.cantidad ?? ""),
         motivo: cuerpo.motivo,
         // La remisión (PL) y el responsable no se corrigen por partida:
         // se reflejan desde la cabecera de la salida (editarSalidaOQC).

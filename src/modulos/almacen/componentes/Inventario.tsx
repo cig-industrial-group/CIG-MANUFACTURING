@@ -31,7 +31,7 @@ import { InsigniaCategoria, IndicadorStock, SelectorAlmacen, SelectorProducto } 
 import { RegistrosSeccion } from "./RegistrosSeccion";
 import { CapturaConteo } from "@/modulos/unidades/componentes/CapturaConteo";
 import { calcularConteo } from "@/modulos/unidades/servicios/consultas";
-import { estadoConteoInicial, textoConteo, type EstadoConteo } from "@/modulos/unidades/tipos";
+import { estadoConteoInicial, multiplicarDecimales, sumarDecimales, textoConteo, type EstadoConteo } from "@/modulos/unidades/tipos";
 import type { Producto } from "../tipos";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -90,8 +90,9 @@ export function Inventario() {
     const skus = new Set(filasFiltradas.map((x) => x.sku));
     return {
       productos: skus.size,
-      unidades: filasFiltradas.reduce((acc, x) => acc + x.cantidad, 0),
-      valor: filasFiltradas.reduce((acc, x) => acc + x.valor, 0),
+      // Suma EXACTA en texto decimal (sin float: ver sumarDecimales)
+      unidades: sumarDecimales(filasFiltradas.map((x) => x.cantidad)),
+      valor: sumarDecimales(filasFiltradas.map((x) => x.valor)),
     };
   }, [filasFiltradas]);
 
@@ -104,9 +105,9 @@ export function Inventario() {
         nombre: string;
         categoria: string;
         unidad: string;
-        stockMinimo: number;
-        total: number;
-        porAlmacen: Array<{ almacenId: string; codigo: string; cantidad: number }>;
+        stockMinimo: string;
+        total: string;
+        porAlmacen: Array<{ almacenId: string; codigo: string; cantidad: string }>;
       }
     >();
     for (const x of filas ?? []) {
@@ -118,10 +119,10 @@ export function Inventario() {
           categoria: x.categoria,
           unidad: x.unidad,
           stockMinimo: x.stockMinimo,
-          total: 0,
-          porAlmacen: [] as Array<{ almacenId: string; codigo: string; cantidad: number }>,
+          total: "0",
+          porAlmacen: [] as Array<{ almacenId: string; codigo: string; cantidad: string }>,
         };
-      agg.total += x.cantidad;
+      agg.total = sumarDecimales([agg.total, x.cantidad]);
       agg.porAlmacen.push({ almacenId: x.almacenId, codigo: x.almacenCodigo, cantidad: x.cantidad });
       mapa.set(x.sku, agg);
     }
@@ -147,20 +148,25 @@ export function Inventario() {
   // Total del ajuste en unidad base según el modo de captura (directo o
   // paquetes del EMPAQUE CONFIGURADO DEL PRODUCTO)
   const resultadoConteoAjuste = calcularConteo(conteoAjuste, productoAjuste);
-  const cantidadAjusteNum = resultadoConteoAjuste.total;
+  /** Total del ajuste en unidad base (texto decimal exacto) */
+  const cantidadAjuste = resultadoConteoAjuste.total;
 
   const stockActualAjuste = useMemo(() => {
     if (!productoAjuste || !almacenAjuste) return null;
-    return filas?.find((x) => x.productoId === productoAjuste.id && x.almacenId === almacenAjuste)?.cantidad ?? 0;
+    return (
+      filas?.find((x) => x.productoId === productoAjuste.id && x.almacenId === almacenAjuste)
+        ?.cantidad ?? "0"
+    );
   }, [filas, productoAjuste, almacenAjuste]);
 
   async function confirmarAjuste() {
     if (!productoAjuste) return setErrorAjuste(t("validaciones.productoRequerido"));
     if (!almacenAjuste) return setErrorAjuste(t("validaciones.almacenRequerido"));
-    if (!Number.isFinite(cantidadAjusteNum) || cantidadAjusteNum <= 0)
+    if (!resultadoConteoAjuste.valido)
       return setErrorAjuste(t("validaciones.cantidadRequerida"));
     if (!motivo.trim()) return setErrorAjuste(t("validaciones.motivoAjusteRequerido"));
-    if (direccion === "NEG" && (stockActualAjuste ?? 0) < cantidadAjusteNum) {
+    // Guarda de UX (comparación numérica); el servidor revalida con Decimal exacto
+    if (direccion === "NEG" && Number(stockActualAjuste ?? 0) < Number(cantidadAjuste)) {
       return setErrorAjuste(t("comun.stockInsuficiente"));
     }
 
@@ -169,7 +175,7 @@ export function Inventario() {
         tipo: "AJUSTE",
         productoId: productoAjuste.id,
         almacenDestinoId: almacenAjuste,
-        cantidad: direccion === "POS" ? cantidadAjusteNum : -cantidadAjusteNum,
+        cantidad: direccion === "POS" ? cantidadAjuste : `-${cantidadAjuste}`,
         motivo: motivo.trim(),
         responsable: responsable || undefined,
         // Conteo en paquetes (si se capturó así): el servidor calcula el total
@@ -177,8 +183,8 @@ export function Inventario() {
           resultadoConteoAjuste.partes && {
             conteo: {
               unidad: conteoAjuste.unidad,
-              paquetes: Number(conteoAjuste.paquetes) || 0,
-              sueltas: Number(conteoAjuste.sueltas) || 0,
+              paquetes: conteoAjuste.paquetes || 0,
+              sueltas: conteoAjuste.sueltas || 0,
             },
           }),
       });
@@ -263,7 +269,7 @@ export function Inventario() {
           valor={
             vista === "almacen"
               ? f.entero(resumen.unidades)
-              : f.entero(porProducto.reduce((acc, p) => acc + p.total, 0))
+              : f.entero(sumarDecimales(porProducto.map((p) => p.total)))
           }
           icono={<Boxes className="h-5 w-5" />}
           tono="neutro"
@@ -274,10 +280,13 @@ export function Inventario() {
             f.moneda(
               vista === "almacen"
                 ? resumen.valor
-                : porProducto.reduce(
-                    (acc, p) =>
-                      acc + p.total * (productos?.find((x) => x.sku === p.sku)?.costoUnitario ?? 0),
-                    0,
+                : sumarDecimales(
+                    porProducto.map((p) =>
+                      multiplicarDecimales(
+                        p.total,
+                        productos?.find((x) => x.sku === p.sku)?.costoUnitario ?? "0",
+                      ),
+                    ),
                   ),
             )
           }
@@ -504,7 +513,7 @@ export function Inventario() {
                 <p className="text-xs text-muted-foreground">
                   {t("inventario.stockActual")}:{" "}
                   <span className="font-semibold tabular-nums text-foreground">
-                    {f.numero(stockActualAjuste ?? 0, 2)} {productoAjuste.unidad}
+                    {f.numero(stockActualAjuste ?? "0", 2)} {productoAjuste.unidad}
                   </span>
                 </p>
               )}
@@ -545,12 +554,12 @@ export function Inventario() {
                 idPrefijo="ajuste"
               />
             </div>
-            {productoAjuste && almacenAjuste && cantidadAjusteNum > 0 && (
+            {productoAjuste && almacenAjuste && resultadoConteoAjuste.valido && (
               <div className="rounded-lg bg-muted/60 px-3 py-2.5 text-sm">
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">{t("inventario.stockActual")}</span>
                   <span className="font-semibold tabular-nums">
-                    {f.numero(stockActualAjuste ?? 0, 2)}
+                    {f.numero(stockActualAjuste ?? "0", 2)}
                   </span>
                 </div>
                 {resultadoConteoAjuste.partes && (
@@ -568,14 +577,16 @@ export function Inventario() {
                     )}
                   >
                     {direccion === "POS" ? "+" : "−"}
-                    {f.numero(cantidadAjusteNum, 2)}
+                    {f.numero(cantidadAjuste, 2)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between border-t pt-1.5">
                   <span className="font-medium">{t("inventario.stockFinal")}</span>
                   <span className="font-bold tabular-nums">
                     {f.numero(
-                      (stockActualAjuste ?? 0) + (direccion === "POS" ? 1 : -1) * cantidadAjusteNum,
+                      direccion === "POS"
+                        ? sumarDecimales([stockActualAjuste ?? "0", cantidadAjuste])
+                        : sumarDecimales([stockActualAjuste ?? "0", `-${cantidadAjuste}`]),
                       2,
                     )}{" "}
                     {productoAjuste.unidad}

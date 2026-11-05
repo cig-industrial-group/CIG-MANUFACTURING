@@ -16,6 +16,7 @@
  */
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { CERO, ESCALA_MAXIMA, type Decimal, desdeBD, texto } from "@/lib/numerico";
 import { resolverConteoTx } from "@/modulos/unidades/servicios/nucleo";
 import { parsearConteo, type ParteConteo } from "@/modulos/unidades/tipos";
 import type { TipoMovimiento } from "../tipos";
@@ -127,8 +128,9 @@ type PrismaTx = Parameters<Parameters<typeof db.$transaction>[0]>[0];
 
 type AlmacenTx = NonNullable<Awaited<ReturnType<PrismaTx["almacen"]["findUnique"]>>>;
 
-/** Tolerancia para comparaciones de punto flotante en cantidades */
-const EPSILON = 1e-9;
+/** Aritmética EXACTA (Decimal): las comparaciones de cantidades no
+ *  necesitan tolerancia — el EPSILON de la era float existía solo para
+ *  absorber el ruido binario de REAL/float64. */
 
 /** Relaciones eliminadas: el movimiento es un registro autodescriptivo
  *  (ledger); los datos de producto/almacén/usuario viven en snapshots. */
@@ -138,8 +140,8 @@ export type FilaMovimiento = {
   id: string;
   folio: string;
   tipo: string;
-  cantidad: number;
-  cantidadDespues: number | null;
+  cantidad: string;
+  cantidadDespues: string | null;
   motivo: string | null;
   referencia: string | null;
   responsable: string | null;
@@ -223,15 +225,22 @@ async function aplicarEfectoStockTx(
     productoId: string;
     almacenOrigenId?: string;
     almacenDestinoId?: string;
-    cantidad: number;
+    cantidad: Decimal;
   },
 ) {
   const { tipo, productoId, cantidad } = cuerpo;
 
-  if (!Number.isFinite(cantidad) || Math.abs(cantidad) < EPSILON) {
+  // Aritmética EXACTA + defensa en profundidad: además de las validaciones
+  // de la frontera (aDecimal), el núcleo —última línea antes de persistir—
+  // rechaza escalas fuera de política (> 6 decimales) y valores no finitos.
+  if (
+    !cantidad.isFinite() ||
+    cantidad.isZero() ||
+    cantidad.decimalPlaces() > ESCALA_MAXIMA
+  ) {
     throw new ErrorNegocio("QUANTIDAD_INVALIDA");
   }
-  if (tipo !== "AJUSTE" && cantidad < 0) {
+  if (tipo !== "AJUSTE" && cantidad.isNeg()) {
     throw new ErrorNegocio("QUANTIDAD_INVALIDA");
   }
 
@@ -240,18 +249,26 @@ async function aplicarEfectoStockTx(
 
   let almacenOrigen: AlmacenTx | null = null;
   let almacenDestino: AlmacenTx | null = null;
-  let cantidadDespues: number | null = null;
+  let cantidadDespues: string | null = null;
 
   if (tipo === "ENTRADA" || tipo === "RECEPCION") {
     if (!cuerpo.almacenDestinoId) throw new ErrorNegocio("ALMACEN_DESTINO_REQUERIDO");
     almacenDestino = await tx.almacen.findUnique({ where: { id: cuerpo.almacenDestinoId } });
     if (!almacenDestino || !almacenDestino.activo) throw new ErrorNegocio("ALMACEN_INVALIDO");
-    const stock = await tx.stock.upsert({
+    // Lectura-modificación-escritura DENTRO de la transacción (SQLite
+    // serializa escritores): la acumulación es Decimal exacta, nunca SQL REAL.
+    const retiro = cantidad.abs();
+    let stock = await tx.stock.findUnique({
       where: { productoId_almacenId: { productoId, almacenId: almacenDestino.id } },
-      create: { productoId, almacenId: almacenDestino.id, cantidad: Math.abs(cantidad) },
-      update: { cantidad: { increment: Math.abs(cantidad) } },
     });
-    cantidadDespues = stock.cantidad;
+    if (!stock) {
+      stock = await tx.stock.create({
+        data: { productoId, almacenId: almacenDestino.id, cantidad: CERO.toString() },
+      });
+    }
+    const nueva = desdeBD(stock.cantidad, "Stock.cantidad").plus(retiro);
+    await tx.stock.update({ where: { id: stock.id }, data: { cantidad: nueva.toString() } });
+    cantidadDespues = nueva.toString();
   } else if (tipo === "SALIDA" || tipo === "SCRAP") {
     // La salida y el scrap retiran material del almacén de origen
     if (!cuerpo.almacenOrigenId) throw new ErrorNegocio("ALMACEN_ORIGEN_REQUERIDO");
@@ -260,11 +277,12 @@ async function aplicarEfectoStockTx(
     const stock = await tx.stock.findUnique({
       where: { productoId_almacenId: { productoId, almacenId: almacenOrigen.id } },
     });
-    const disponible = stock?.cantidad ?? 0;
-    const retiro = Math.abs(cantidad);
-    if (disponible + EPSILON < retiro) throw new ErrorNegocio("STOCK_INSUFICIENTE");
-    await tx.stock.update({ where: { id: stock!.id }, data: { cantidad: disponible - retiro } });
-    cantidadDespues = disponible - retiro;
+    const disponible = stock ? desdeBD(stock.cantidad, "Stock.cantidad") : CERO;
+    const retiro = cantidad.abs();
+    if (disponible.minus(retiro).isNeg()) throw new ErrorNegocio("STOCK_INSUFICIENTE");
+    const nueva = disponible.minus(retiro);
+    await tx.stock.update({ where: { id: stock!.id }, data: { cantidad: nueva.toString() } });
+    cantidadDespues = nueva.toString();
   } else if (tipo === "TRASLADO") {
     if (!cuerpo.almacenOrigenId || !cuerpo.almacenDestinoId) {
       throw new ErrorNegocio("TRASLADO_REQUIERE_AMBOS");
@@ -275,38 +293,49 @@ async function aplicarEfectoStockTx(
     almacenOrigen = await tx.almacen.findUnique({ where: { id: cuerpo.almacenOrigenId } });
     almacenDestino = await tx.almacen.findUnique({ where: { id: cuerpo.almacenDestinoId } });
     if (!almacenOrigen?.activo || !almacenDestino?.activo) throw new ErrorNegocio("ALMACEN_INVALIDO");
-    const cantidadMov = Math.abs(cantidad);
+    const cantidadMov = cantidad.abs();
 
     const stockOrigen = await tx.stock.findUnique({
       where: { productoId_almacenId: { productoId, almacenId: almacenOrigen.id } },
     });
-    const disponible = stockOrigen?.cantidad ?? 0;
-    if (disponible + EPSILON < cantidadMov) throw new ErrorNegocio("STOCK_INSUFICIENTE");
+    const disponible = stockOrigen ? desdeBD(stockOrigen.cantidad, "Stock.cantidad") : CERO;
+    if (disponible.minus(cantidadMov).isNeg()) throw new ErrorNegocio("STOCK_INSUFICIENTE");
     if (stockOrigen) {
       await tx.stock.update({
         where: { id: stockOrigen.id },
-        data: { cantidad: disponible - cantidadMov },
+        data: { cantidad: disponible.minus(cantidadMov).toString() },
       });
     }
-    const stockDestino = await tx.stock.upsert({
+    let stockDestino = await tx.stock.findUnique({
       where: { productoId_almacenId: { productoId, almacenId: almacenDestino.id } },
-      create: { productoId, almacenId: almacenDestino.id, cantidad: cantidadMov },
-      update: { cantidad: { increment: cantidadMov } },
     });
-    cantidadDespues = stockDestino.cantidad;
+    if (!stockDestino) {
+      stockDestino = await tx.stock.create({
+        data: { productoId, almacenId: almacenDestino.id, cantidad: CERO.toString() },
+      });
+    }
+    const nuevaDestino = desdeBD(stockDestino.cantidad, "Stock.cantidad").plus(cantidadMov);
+    await tx.stock.update({
+      where: { id: stockDestino.id },
+      data: { cantidad: nuevaDestino.toString() },
+    });
+    cantidadDespues = nuevaDestino.toString();
   } else if (tipo === "AJUSTE") {
     if (!cuerpo.almacenDestinoId) throw new ErrorNegocio("ALMACEN_DESTINO_REQUERIDO");
     almacenDestino = await tx.almacen.findUnique({ where: { id: cuerpo.almacenDestinoId } });
     if (!almacenDestino?.activo) throw new ErrorNegocio("ALMACEN_INVALIDO");
-    const stock = await tx.stock.upsert({
+    let stock = await tx.stock.findUnique({
       where: { productoId_almacenId: { productoId, almacenId: almacenDestino.id } },
-      create: { productoId, almacenId: almacenDestino.id, cantidad: 0 },
-      update: {},
     });
-    const nuevo = stock.cantidad + cantidad; // cantidad firmada
-    if (nuevo < -EPSILON) throw new ErrorNegocio("AJUSTE_NEGATIVO");
-    await tx.stock.update({ where: { id: stock.id }, data: { cantidad: nuevo } });
-    cantidadDespues = nuevo;
+    if (!stock) {
+      stock = await tx.stock.create({
+        data: { productoId, almacenId: almacenDestino.id, cantidad: CERO.toString() },
+      });
+    }
+    const nuevo = desdeBD(stock.cantidad, "Stock.cantidad").plus(cantidad); // cantidad firmada
+    if (nuevo.isNeg()) throw new ErrorNegocio("AJUSTE_NEGATIVO");
+    await tx.stock.update({ where: { id: stock.id }, data: { cantidad: nuevo.toString() } });
+    cantidadDespues = nuevo.toString();
   } else {
     throw new ErrorNegocio("TIPO_INVALIDO");
   }
@@ -326,46 +355,48 @@ async function revertirEfectoStockTx(
     productoId: string;
     almacenOrigenId: string | null;
     almacenDestinoId: string | null;
-    cantidad: number;
+    cantidad: string;
   },
 ) {
   /** Suma `delta` al stock (producto, almacén); `exigir` prohíbe negativos */
   const compensar = async (
     productoId: string,
     almacenId: string | null,
-    delta: number,
+    delta: Decimal,
     exigirNoNegativo: boolean,
   ) => {
     if (!almacenId) return;
     const stock = await tx.stock.findUnique({
       where: { productoId_almacenId: { productoId, almacenId } },
     });
-    const actual = stock?.cantidad ?? 0;
-    const nuevo = actual + delta;
-    if (exigirNoNegativo && nuevo < -EPSILON) {
+    const actual = stock ? desdeBD(stock.cantidad, "Stock.cantidad") : CERO;
+    const nuevo = actual.plus(delta);
+    if (exigirNoNegativo && nuevo.isNeg()) {
       throw new ErrorNegocio("REVERSION_NEGATIVA");
     }
-    const final = nuevo < EPSILON && nuevo > -EPSILON ? 0 : nuevo;
+    // El cero exacto sustituye al «snap ±EPSILON» de la era float
+    const finalTexto = (nuevo.isNeg() ? CERO : nuevo).toString();
     if (stock) {
-      await tx.stock.update({ where: { id: stock.id }, data: { cantidad: Math.max(0, final) } });
+      await tx.stock.update({ where: { id: stock.id }, data: { cantidad: finalTexto } });
     } else {
-      await tx.stock.create({ data: { productoId, almacenId, cantidad: Math.max(0, final) } });
+      await tx.stock.create({ data: { productoId, almacenId, cantidad: finalTexto } });
     }
   };
 
+  const cantidad = desdeBD(mov.cantidad, "Movimiento.cantidad");
   if (mov.tipo === "ENTRADA" || mov.tipo === "RECEPCION") {
     // Se había sumado al destino: se resta sin permitir negativos
-    await compensar(mov.productoId, mov.almacenDestinoId, -Math.abs(mov.cantidad), true);
+    await compensar(mov.productoId, mov.almacenDestinoId, cantidad.abs().neg(), true);
   } else if (mov.tipo === "SALIDA" || mov.tipo === "SCRAP") {
     // Se había restado del origen: se devuelve
-    await compensar(mov.productoId, mov.almacenOrigenId, Math.abs(mov.cantidad), false);
+    await compensar(mov.productoId, mov.almacenOrigenId, cantidad.abs(), false);
   } else if (mov.tipo === "TRASLADO") {
     // Se restó del origen y sumó al destino: se invierte en ambos
-    await compensar(mov.productoId, mov.almacenDestinoId, -Math.abs(mov.cantidad), true);
-    await compensar(mov.productoId, mov.almacenOrigenId, Math.abs(mov.cantidad), false);
+    await compensar(mov.productoId, mov.almacenDestinoId, cantidad.abs().neg(), true);
+    await compensar(mov.productoId, mov.almacenOrigenId, cantidad.abs(), false);
   } else if (mov.tipo === "AJUSTE") {
     // Ajuste firmado: se resta la cantidad ajustada sin permitir negativos
-    await compensar(mov.productoId, mov.almacenDestinoId, -mov.cantidad, true);
+    await compensar(mov.productoId, mov.almacenDestinoId, cantidad.neg(), true);
   } else {
     throw new ErrorNegocio("TIPO_INVALIDO");
   }
@@ -378,8 +409,8 @@ async function revertirEfectoStockTx(
 function snapshotMovimiento(m: {
   folio: string;
   tipo: string;
-  cantidad: number;
-  cantidadDespues: number | null;
+  cantidad: string;
+  cantidadDespues: string | null;
   motivo: string | null;
   referencia: string | null;
   responsable: string | null;
@@ -445,7 +476,7 @@ export async function registrarMovimientoTx(
     productoId: string;
     almacenOrigenId?: string;
     almacenDestinoId?: string;
-    cantidad: number;
+    cantidad: Decimal;
     motivo?: string;
     referencia?: string;
     responsable?: string;
@@ -459,9 +490,9 @@ export async function registrarMovimientoTx(
     salidaId?: string;
     salidaFolio?: string;
     /** Conteo en paquetes: { unidad: "CJA", paquetes: 2, sueltas: 3 } */
-    conteo?: { unidad: string; paquetes?: number; sueltas?: number };
+    conteo?: { unidad: string; paquetes?: number | string; sueltas?: number | string };
     /** Conteo ya resuelto y fusionado (multi-línea OQC): total + partes */
-    conteoResuelto?: { cantidad: number; partes: ParteConteo[] };
+    conteoResuelto?: { cantidad: Decimal; partes: ParteConteo[] };
   },
 ) {
   // El producto se lee ANTES del efecto: la unidad de conteo se valida
@@ -478,8 +509,9 @@ export async function registrarMovimientoTx(
   let cantidad = cuerpo.cantidad;
   let conteoDetalle: string | null = null;
   if (conteo) {
+    // En ajustes, el SIGNO de la captura directa define la dirección del conteo
     cantidad =
-      cuerpo.tipo === "AJUSTE" ? Math.sign(cuerpo.cantidad || 1) * conteo.cantidad : conteo.cantidad;
+      cuerpo.tipo === "AJUSTE" && cuerpo.cantidad.isNeg() ? conteo.cantidad.neg() : conteo.cantidad;
     conteoDetalle = JSON.stringify(conteo.partes);
   }
 
@@ -497,7 +529,7 @@ export async function registrarMovimientoTx(
       almacenOrigenId: almacenOrigen?.id ?? null,
       almacenDestinoId: almacenDestino?.id ?? null,
       // Los ajustes conservan el signo; el resto siempre es positivo
-      cantidad: cuerpo.tipo === "AJUSTE" ? cantidad : Math.abs(cantidad),
+      cantidad: texto(cuerpo.tipo === "AJUSTE" ? cantidad : cantidad.abs()),
       cantidadDespues,
       motivo: cuerpo.motivo?.trim() || null,
       referencia: cuerpo.referencia?.trim() || null,
@@ -541,7 +573,7 @@ export async function editarMovimientoTx(
     productoId: string;
     almacenOrigenId?: string;
     almacenDestinoId?: string;
-    cantidad: number;
+    cantidad: Decimal;
     motivo?: string;
     referencia?: string;
     responsable?: string;
@@ -588,7 +620,7 @@ export async function editarMovimientoTx(
       productoId: cuerpo.productoId,
       almacenOrigenId: almacenOrigen?.id ?? null,
       almacenDestinoId: almacenDestino?.id ?? null,
-      cantidad: actual.tipo === "AJUSTE" ? cuerpo.cantidad : Math.abs(cuerpo.cantidad),
+      cantidad: texto(actual.tipo === "AJUSTE" ? cuerpo.cantidad : cuerpo.cantidad.abs()),
       cantidadDespues,
       motivo: cuerpo.motivo !== undefined ? cuerpo.motivo?.trim() || null : actual.motivo,
       referencia:

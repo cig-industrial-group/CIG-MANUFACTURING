@@ -10,6 +10,7 @@
 
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { CERO, aDecimal, sumar } from "@/lib/numerico";
 import { requerirPermiso } from "@/modulos/autenticacion/servicios/auth";
 import {
   asegurarUnidadesBase,
@@ -39,17 +40,24 @@ export async function GET(request: Request) {
     orderBy: { sku: "asc" },
   });
 
-  const stocks = await db.stock.groupBy({
-    by: ["productoId"],
-    _sum: { cantidad: true },
+  // Suma Decimal exacta en la capa de aplicación (el agregado _sum de SQL
+  // no aplica a texto decimal; prohibido float en agregados de inventario)
+  const stocks = await db.stock.findMany({
+    select: { productoId: true, cantidad: true },
   });
-  const stockPorProducto = new Map(stocks.map((s) => [s.productoId, s._sum.cantidad ?? 0]));
+  const stockPorProducto = new Map<string, string>();
+  for (const s of stocks) {
+    stockPorProducto.set(
+      s.productoId,
+      sumar([stockPorProducto.get(s.productoId) ?? CERO.toString(), s.cantidad]).toString(),
+    );
+  }
 
   return NextResponse.json(
     productos.map((p) => ({
       ...p,
       createdAt: p.createdAt.toISOString(),
-      stockTotal: stockPorProducto.get(p.id) ?? 0,
+      stockTotal: stockPorProducto.get(p.id) ?? CERO.toString(),
     })),
   );
 }
@@ -75,7 +83,7 @@ export async function POST(request: Request) {
 
     // Empaque de conteo configurado POR PRODUCTO: cuántas unidades base
     // lleva cada paquete (p. ej. 80101-06129 → 1 PAQ = 10 PZA).
-    let empaque: { unidadPaquete: string | null; contenidoPaquete: number | null };
+    let empaque: { unidadPaquete: string | null; contenidoPaquete: string | null };
     try {
       empaque = await validarEmpaqueProducto(unidad, cuerpo);
     } catch (e) {
@@ -94,17 +102,19 @@ export async function POST(request: Request) {
         unidad,
         unidadPaquete: empaque.unidadPaquete,
         contenidoPaquete: empaque.contenidoPaquete,
-        stockMinimo: Number.isFinite(Number(cuerpo.stockMinimo)) ? Number(cuerpo.stockMinimo) : 0,
+        // Decimal exacto: entrada inválida → 0 (mismo contrato que antes)
+        stockMinimo: aDecimal(cuerpo.stockMinimo)?.toString() ?? CERO.toString(),
         costoUnitario:
           cuerpo.costoUnitario === null || cuerpo.costoUnitario === "" || cuerpo.costoUnitario === undefined
             ? null
-            : Number(cuerpo.costoUnitario) >= 0
-              ? Number(cuerpo.costoUnitario)
-              : null,
+            : (() => {
+                const costo = aDecimal(cuerpo.costoUnitario);
+                return costo && !costo.isNeg() ? costo.toString() : null;
+              })(),
       },
     });
     return NextResponse.json(
-      { ...producto, createdAt: producto.createdAt.toISOString(), stockTotal: 0 },
+      { ...producto, createdAt: producto.createdAt.toISOString(), stockTotal: CERO.toString() },
       { status: 201 },
     );
   } catch {

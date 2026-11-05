@@ -23,6 +23,7 @@ import {
   listarUnidades,
 } from "./api";
 import type { CuerpoUnidad, EmpaqueProductoConteo, EstadoConteo, ParteConteo, Unidad } from "../tipos";
+import { aTextoDecimal, esDecimalPositivo } from "../tipos";
 
 export const CLAVES_QUERY_UNIDADES = {
   unidades: ["unidades"] as const,
@@ -88,7 +89,7 @@ export function paqueteDelProducto(
   producto: EmpaqueProductoConteo | null | undefined,
 ): Unidad | null {
   if (!unidades || !producto?.unidadPaquete) return null;
-  if (!((producto.contenidoPaquete ?? 0) > 0)) return null;
+  if (!esDecimalPositivo(producto.contenidoPaquete)) return null;
   const unidad = unidades.find(
     (u) => u.codigo === producto.unidadPaquete && u.activo && u.tipo === "PAQUETE",
   );
@@ -106,8 +107,8 @@ export function buscarUnidad(unidades: Unidad[] | undefined, codigo: string): Un
 export interface ResultadoConteo {
   /** true si la captura es en paquetes (unidad de empaque del producto) */
   enPaquetes: boolean;
-  /** total en unidad base (0 si la captura está vacía) */
-  total: number;
+  /** total en unidad base (texto decimal canónico, máx. 6 decimales; "0" si está vacía) */
+  total: string;
   /** true si el total es válido (> 0) */
   valido: boolean;
   /** partes del detalle (solo en modo paquete con datos) */
@@ -119,7 +120,8 @@ export interface ResultadoConteo {
  * captura, usando el EMPAQUE CONFIGURADO DEL PRODUCTO (la cantidad que
  * lleva cada paquete varía por producto). Es el espejo cliente de
  * `resolverConteoTx` (el servidor recalcula y valida todo de forma
- * autoritativa).
+ * autoritativa con Decimal exacto); aquí la previsualización se
+ * normaliza a 6 decimales para coincidir con el resultado del servidor.
  */
 export function calcularConteo(
   estado: EstadoConteo,
@@ -134,27 +136,37 @@ export function calcularConteo(
 
   if (!esPaquete) {
     // Captura directa en la unidad base del producto
-    const cantidad = Number(estado.sueltas);
+    const cantidad = aTextoDecimal(estado.sueltas);
     return {
       enPaquetes: false,
-      total: Number.isFinite(cantidad) ? cantidad : 0,
-      valido: Number.isFinite(cantidad) && cantidad > 0,
+      total: cantidad ?? "0",
+      valido: cantidad !== null && esDecimalPositivo(cantidad),
       partes: null,
     };
   }
 
-  const paquetes = Number(estado.paquetes);
-  const sueltas = Number(estado.sueltas);
-  const factor = producto?.contenidoPaquete ?? 0;
-  const pOk = Number.isFinite(paquetes) && paquetes >= 0;
-  const sOk = Number.isFinite(sueltas) && sueltas >= 0;
-  if (!pOk || !sOk || !Number.isFinite(factor) || factor <= 0) {
-    return { enPaquetes: true, total: 0, valido: false, partes: null };
+  const paquetes = aTextoDecimal(estado.paquetes);
+  const sueltas = aTextoDecimal(estado.sueltas);
+  const factor = aTextoDecimal(producto?.contenidoPaquete ?? null);
+  if (
+    paquetes === null ||
+    sueltas === null ||
+    factor === null ||
+    paquetes.startsWith("-") ||
+    sueltas.startsWith("-") ||
+    !esDecimalPositivo(factor)
+  ) {
+    return { enPaquetes: true, total: "0", valido: false, partes: null };
   }
 
-  const total = paquetes * factor + sueltas;
+  // Espejo cliente (SOLO previsualización): el servidor recalculará con
+  // Decimal exacto. Se normaliza a 6 decimales para ocultar el ruido
+  // binario de la vista previa (p. ej. 0.1 × 3 → 0.3, no 0.30000000000000004).
+  const totalNumerico = Number(paquetes) * Number(factor) + Number(sueltas);
+  const total = aTextoDecimal(String(Math.round(totalNumerico * 1e6) / 1e6)) ?? "0";
+
   const partes: ParteConteo[] = [];
-  if (paquetes > 0) {
+  if (esDecimalPositivo(paquetes)) {
     partes.push({
       unidad: producto!.unidadPaquete!,
       nombre: producto!.unidadPaquete!,
@@ -162,14 +174,14 @@ export function calcularConteo(
       cantidad: paquetes,
     });
   }
-  if (sueltas > 0) {
-    partes.push({ unidad: unidadBase, nombre: unidadBase, factor: 1, cantidad: sueltas });
+  if (esDecimalPositivo(sueltas)) {
+    partes.push({ unidad: unidadBase, nombre: unidadBase, factor: "1", cantidad: sueltas });
   }
 
   return {
     enPaquetes: true,
     total,
-    valido: total > 0,
+    valido: esDecimalPositivo(total),
     partes: partes.length > 0 ? partes : null,
   };
 }

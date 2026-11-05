@@ -38,7 +38,13 @@ import { SelectorAlmacen, SelectorProducto, InsigniaTipoMovimiento } from "./com
 import { RegistrosSeccion } from "./RegistrosSeccion";
 import { CapturaConteo } from "@/modulos/unidades/componentes/CapturaConteo";
 import { calcularConteo } from "@/modulos/unidades/servicios/consultas";
-import { estadoConteoInicial, textoConteo, type EstadoConteo } from "@/modulos/unidades/tipos";
+import {
+  compararDecimales,
+  esDecimalPositivo,
+  estadoConteoInicial,
+  textoConteo,
+  type EstadoConteo,
+} from "@/modulos/unidades/tipos";
 import type { MovimientoResumen, Producto } from "../tipos";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -207,7 +213,7 @@ function FormularioOperacion({ config }: { config: ConfigOperacion }) {
   );
   const stockDisponible = useMemo(() => {
     if (!config.requiereOrigen || !stockOrigen || !productoId) return null;
-    return stockOrigen.find((s) => s.productoId === productoId)?.cantidad ?? 0;
+    return stockOrigen.find((s) => s.productoId === productoId)?.cantidad ?? "0";
   }, [stockOrigen, productoId, config.requiereOrigen]);
 
   const productosFiltrados = useMemo(() => {
@@ -228,9 +234,9 @@ function FormularioOperacion({ config }: { config: ConfigOperacion }) {
   }
 
   // Total en unidad base según el modo de captura (directo o paquetes
-  // del EMPAQUE CONFIGURADO DEL PRODUCTO)
+  // del EMPAQUE CONFIGURADO DEL PRODUCTO) — texto decimal exacto
   const resultadoConteo = calcularConteo(conteo, productoSel);
-  const cantidadNum = resultadoConteo.total;
+  const cantidadTotal = resultadoConteo.total;
 
   function limpiar() {
     setProductoId("");
@@ -254,14 +260,15 @@ function FormularioOperacion({ config }: { config: ConfigOperacion }) {
     if (!productoId) return setError(t("validaciones.productoRequerido"));
     if (config.requiereDestino && !almacenDestinoId) return setError(t("validaciones.almacenRequerido"));
     if (config.requiereOrigen && !almacenOrigenId) return setError(t("validaciones.almacenRequerido"));
-    if (!Number.isFinite(cantidadNum) || cantidadNum <= 0) return setError(t("validaciones.cantidadRequerida"));
+    if (!resultadoConteo.valido) return setError(t("validaciones.cantidadRequerida"));
     if (config.tipo === "TRASLADO" && almacenOrigenId === almacenDestinoId) {
       return setError(t("comun.seleccionarAlmacenesDistintos"));
     }
+    // Comparación EXACTA de textos decimales (guarda de UX; el servidor revalida)
     if (
       config.requiereOrigen &&
       stockDisponible !== null &&
-      cantidadNum > stockDisponible
+      compararDecimales(cantidadTotal, stockDisponible) > 0
     ) {
       return setError(t("comun.stockInsuficiente"));
     }
@@ -288,7 +295,7 @@ function FormularioOperacion({ config }: { config: ConfigOperacion }) {
         productoId,
         almacenOrigenId: config.requiereOrigen ? almacenOrigenId : undefined,
         almacenDestinoId: config.requiereDestino ? almacenDestinoId : undefined,
-        cantidad: cantidadNum,
+        cantidad: cantidadTotal,
         motivo,
         referencia,
         responsable: responsable || undefined,
@@ -297,8 +304,8 @@ function FormularioOperacion({ config }: { config: ConfigOperacion }) {
           resultadoConteo.partes && {
             conteo: {
               unidad: conteo.unidad,
-              paquetes: Number(conteo.paquetes) || 0,
-              sueltas: Number(conteo.sueltas) || 0,
+              paquetes: conteo.paquetes || 0,
+              sueltas: conteo.sueltas || 0,
             },
           }),
       });
@@ -431,12 +438,14 @@ function FormularioOperacion({ config }: { config: ConfigOperacion }) {
                 <p
                   className={cn(
                     "text-xs",
-                    (stockDisponible ?? 0) <= 0 ? "font-semibold text-orange-600 dark:text-orange-400" : "text-muted-foreground",
+                    !esDecimalPositivo(stockDisponible)
+                      ? "font-semibold text-orange-600 dark:text-orange-400"
+                      : "text-muted-foreground",
                   )}
                 >
                   {t("operacion.stockOrigen")}:{" "}
                   <span className="font-semibold tabular-nums text-foreground">
-                    {f.numero(stockDisponible ?? 0, 1)} {productoSel?.unidad ?? "PZA"}
+                    {f.numero(stockDisponible ?? "0", 1)} {productoSel?.unidad ?? "PZA"}
                   </span>
                 </p>
               )}

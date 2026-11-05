@@ -100,11 +100,18 @@ model Producto {
   // unidades. Ej.: 80101-06129 → 1 PAQ = 10 PZA; 80101-06130 → 1 PAQ = 24 PZA.
   // El stock SIEMPRE vive en la unidad base; el empaque es solo una
   // forma de capturar y desplegar el conteo (3 PAQ × 10 + 2 PZA = 32 PZA).
+  // ===== INTEGRIDAD NUMÉRICA (remediación Fase 1) =====
+  // Las cantidades, costos y medidas se almacenan como TEXTO decimal
+  // exacto (nunca Float/Double: SQLite persistiría REAL/float64 y la
+  // aritmética acumularía errores de redondeo — p. ej. 0.1+0.1+0.1 =
+  // 0.30000000000000004). Toda la aritmética se hace con Decimal exacto
+  // en la capa de aplicación (src/lib/numerico.ts). Al migrar a
+  // PostgreSQL estos campos pueden pasar a NUMERIC sin cambio de código.
   unidadPaquete    String? // código de la unidad de paquete del catálogo (PAQ, CJA...)
-  contenidoPaquete Float? // unidades base que contiene cada paquete (10)
+  contenidoPaquete String? // unidades base que contiene cada paquete ("10"; decimal exacto)
 
-  stockMinimo  Float     @default(0)
-  costoUnitario Float?
+  stockMinimo  String    @default("0") // decimal exacto en unidad base
+  costoUnitario String? // costo por unidad (monetario, decimal exacto)
   activo       Boolean   @default(true)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -116,7 +123,7 @@ model Stock {
   id         String   @id @default(cuid())
   productoId String
   almacenId  String
-  cantidad   Float    @default(0)
+  cantidad   String   @default("0") // decimal exacto en unidad base (ver src/lib/numerico.ts)
   updatedAt  DateTime @updatedAt
 
   producto Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
@@ -139,8 +146,8 @@ model Movimiento {
   productoId       String // referencia suave (sin FK)
   almacenOrigenId  String? // referencia suave (sin FK)
   almacenDestinoId String? // referencia suave (sin FK)
-  cantidad         Float
-  cantidadDespues  Float? // snapshot de stock resultante
+  cantidad         String // decimal exacto en unidad base (ver src/lib/numerico.ts)
+  cantidadDespues  String? // snapshot de stock resultante (decimal exacto)
   motivo           String?
   referencia       String? // factura, orden de compra, orden de producción...
   responsable      String?
@@ -424,7 +431,7 @@ model RegistroScrap {
   almacenCodigo String?
   almacenNombre String?
 
-  cantidad    Float
+  cantidad    String // decimal exacto en unidad base (ver src/lib/numerico.ts)
   motivo      String // causa del scrap (defecto, daño, no conforme...)
   notas       String?
   responsable String?
@@ -466,7 +473,7 @@ model RegistroRechazo {
   salidaId    String?
   salidaFolio String?
 
-  cantidad     Float
+  cantidad     String // decimal exacto (documental; ver src/lib/numerico.ts)
   motivo       String // defecto / causa del rechazo
   disposicion  String @default("PENDIENTE") // PENDIENTE | RETRABAJO | SCRAP | LIBERADO
   notas        String?

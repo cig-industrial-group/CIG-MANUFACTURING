@@ -251,12 +251,12 @@ export function HistorialMovimientos() {
                     <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold tabular-nums">
                       <span
                         className={cn(
-                          m.tipo === "SALIDA" || (m.tipo === "AJUSTE" && m.cantidad < 0)
+                          m.tipo === "SALIDA" || (m.tipo === "AJUSTE" && m.cantidad.startsWith("-"))
                             ? "text-orange-600 dark:text-orange-400"
                             : "text-emerald-600 dark:text-emerald-400",
                         )}
                       >
-                        {m.tipo === "AJUSTE" && m.cantidad > 0 ? "+" : ""}
+                        {m.tipo === "AJUSTE" && !m.cantidad.startsWith("-") ? "+" : ""}
                         {m.tipo === "SALIDA" ? "−" : ""}
                         {f.numero(m.cantidad, 2)}
                       </span>{" "}
@@ -353,12 +353,12 @@ export function HistorialMovimientos() {
                   <span
                     className={cn(
                       "shrink-0 font-bold tabular-nums",
-                      m.tipo === "SALIDA" || (m.tipo === "AJUSTE" && m.cantidad < 0)
+                      m.tipo === "SALIDA" || (m.tipo === "AJUSTE" && m.cantidad.startsWith("-"))
                         ? "text-orange-600 dark:text-orange-400"
                         : "text-emerald-600 dark:text-emerald-400",
                     )}
                   >
-                    {m.tipo === "SALIDA" ? "−" : m.tipo === "AJUSTE" && m.cantidad > 0 ? "+" : ""}
+                    {m.tipo === "SALIDA" ? "−" : m.tipo === "AJUSTE" && !m.cantidad.startsWith("-") ? "+" : ""}
                     {f.numero(m.cantidad, 1)} {m.productoUnidad}
                   </span>
                   {m.conteo && (

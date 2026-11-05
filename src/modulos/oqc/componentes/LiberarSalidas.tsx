@@ -31,7 +31,14 @@ import { ErrorApi } from "../servicios/api";
 import { claveErrorApi } from "../servicios/errores";
 import { CapturaConteo } from "@/modulos/unidades/componentes/CapturaConteo";
 import { calcularConteo } from "@/modulos/unidades/servicios/consultas";
-import { estadoConteoInicial, textoConteo, type EstadoConteo } from "@/modulos/unidades/tipos";
+import {
+  compararDecimales,
+  esDecimalPositivo,
+  estadoConteoInicial,
+  sumarDecimales,
+  textoConteo,
+  type EstadoConteo,
+} from "@/modulos/unidades/tipos";
 import type { SalidaOQC } from "../tipos";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -138,10 +145,11 @@ export function LiberarSalidas() {
   }
 
   /** Total de una línea en unidad base (directo o paquetes + sueltas
-   *  según el empaque configurado del producto). Memorizada con useCallback:
-   *  la consumen los useMemo de abajo y solo depende de productosActivos. */
+   *  según el empaque configurado del producto) — texto decimal exacto.
+   *  Memorizada con useCallback: la consumen los useMemo de abajo y solo
+   *  depende de productosActivos. */
   const totalLinea = useCallback(
-    (linea: LineaFormulario): number => {
+    (linea: LineaFormulario): string => {
       const producto = productosActivos.find((p) => p.id === linea.productoId) ?? null;
       return calcularConteo(linea.conteo, producto).total;
     },
@@ -152,7 +160,7 @@ export function LiberarSalidas() {
   const partidasValidas = useMemo(
     () =>
       lineas
-        .filter((l) => l.productoId && totalLinea(l) > 0)
+        .filter((l) => l.productoId && esDecimalPositivo(totalLinea(l)))
         .map((l) => {
           const producto = productosActivos.find((p) => p.id === l.productoId) ?? null;
           const resultado = calcularConteo(l.conteo, producto);
@@ -164,8 +172,8 @@ export function LiberarSalidas() {
               resultado.partes && {
                 conteo: {
                   unidad: l.conteo.unidad,
-                  paquetes: Number(l.conteo.paquetes) || 0,
-                  sueltas: Number(l.conteo.sueltas) || 0,
+                  paquetes: l.conteo.paquetes || 0,
+                  sueltas: l.conteo.sueltas || 0,
                 },
               }),
           };
@@ -179,19 +187,20 @@ export function LiberarSalidas() {
     return new Set(ids).size !== ids.length;
   }, [partidasValidas]);
 
-  /** Validación en vivo: cantidades que exceden el stock del almacén origen */
+  /** Validación en vivo: cantidades que exceden el stock del almacén origen
+   *  (comparación EXACTA de textos decimales; el servidor revalida) */
   const partidasSinStock = useMemo(() => {
     if (!almacenOrigenId) return new Set<number>();
     const excedidas = new Set<number>();
-    const acumulado = new Map<string, number>();
+    const acumulado = new Map<string, string>();
     for (const l of lineas) {
       if (!l.productoId) continue;
       const cant = totalLinea(l);
-      if (Number.isFinite(cant) && cant > 0) {
-        const total = (acumulado.get(l.productoId) ?? 0) + cant;
+      if (esDecimalPositivo(cant)) {
+        const total = sumarDecimales([acumulado.get(l.productoId) ?? "0", cant]);
         acumulado.set(l.productoId, total);
-        const disponible = stockPorProducto.get(l.productoId) ?? 0;
-        if (total > disponible) excedidas.add(l.key);
+        const disponible = stockPorProducto.get(l.productoId) ?? "0";
+        if (compararDecimales(total, disponible) > 0) excedidas.add(l.key);
       }
     }
     return excedidas;
@@ -236,7 +245,7 @@ export function LiberarSalidas() {
     }
   }
 
-  const totalUnidades = partidasValidas.reduce((acc, p) => acc + p.cantidad, 0);
+  const totalUnidades = sumarDecimales(partidasValidas.map((p) => p.cantidad));
 
   // ===== Pantalla de éxito =====
   if (resultado) {
