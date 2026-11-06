@@ -9,18 +9,24 @@
 
 # ============================================================
 # CIG-MANUFACTURING — Entrypoint del contenedor de producción
+# (app + servidor PostgreSQL externo, ver docker-compose.yml)
 #
 # Orden de operaciones (cualquier fallo DETIENE el arranque):
 #   1. Validar AUTH_SECRET (obligatorio, ≥32 chars, no publicado).
-#   2. Validar DATABASE_URL y que /data sea escribible.
-#   3. Aplicar el esquema de base de datos (prisma db push).
-#   4. Sembrar roles/config (idempotente); el usuario ADMIN solo se
+#   2. Validar DATABASE_URL (URL de PostgreSQL).
+#   3. Esperar a que el servidor de BD acepte conexiones (pg_isready,
+#      hasta 120 s: compose ya aplica su healthcheck, esto absorbe
+#      arranques en frío más lentos).
+#   4. Aplicar migraciones (prisma migrate deploy — auditable y
+#      idempotente: registra cada migración aplicada en la base).
+#   5. Sembrar roles/config (idempotente); el usuario ADMIN solo se
 #      crea en una base SIN usuarios (primera instalación).
-#   5. Localizar server.js del standalone y ejecutarlo con bun.
+#   6. Localizar server.js del standalone y ejecutarlo con bun.
 #
-# Nunca imprime secretos. Ante error crítico: mensaje claro + exit 1
-# (Docker marca el contenedor como fallido; restart-policy reintenta,
-# pero el proceso jamás "sigue adelante" con el sistema a medias).
+# Nunca imprime secretos (DATABASE_URL se valida por formato, jamás
+# se hace eco de su contenido). Ante error crítico: mensaje claro +
+# exit 1 (Docker marca el contenedor como fallido; restart-policy
+# reintenta, pero el proceso jamás "sigue adelante" a medias).
 # ============================================================
 set -euo pipefail
 cd /app
@@ -47,43 +53,70 @@ if [ "${COOKIE_INSEGURA_HTTP:-}" = "1" ]; then
 fi
 
 # ------------------------------------------------------------
-# 2) Base de datos: variable presente y destino escribible
+# 2) Base de datos: URL de PostgreSQL presente y con formato válido
 # ------------------------------------------------------------
-: "${DATABASE_URL:?✖ DATABASE_URL no está definida (esperado: file:/data/cig-manufacturing.db)}"
+: "${DATABASE_URL:?✖ DATABASE_URL no está definida (esperado: postgresql://usuario:clave@host:5432/base?schema=public)}"
 
-if [[ "$DATABASE_URL" != file:* ]]; then
-  echo "✖ DATABASE_URL debe apuntar a un archivo SQLite (formato file:ruta). Valor recibido: formato no soportado."
+if [[ "$DATABASE_URL" != postgresql://* && "$DATABASE_URL" != postgres://* ]]; then
+  echo "✖ DATABASE_URL debe ser una URL de PostgreSQL (postgresql://usuario:clave@host:puerto/base)."
+  echo "  Formato recibido: no soportado. Si conservas una URL file: de la era"
+  echo "  SQLite, migra la configuración con ayuda de .env.example."
   exit 1
 fi
 
-RUTA_BD="${DATABASE_URL#file:}"
-DIR_BD="$(dirname "$RUTA_BD")"
-mkdir -p "$DIR_BD" 2>/dev/null || true
-if ! touch "$RUTA_BD" 2>/dev/null; then
-  echo "✖ No se puede escribir la base de datos en: $RUTA_BD"
-  echo "  Si el volumen proviene de una instalación anterior (propietario root),"
-  echo "  corrige la propiedad con:  docker compose exec cig-manufacturing true || \\"
-  echo "    docker run --rm -v cig-manufacturing-data:/data alpine chown -R 1000:1000 /data"
+# Componentes de conexión (host/puerto/usuario/base — sin la contraseña,
+# que solo viaja por la variable de entorno del proceso de la app).
+# El parseo se hace con el runtime Bun (new URL maneja el
+# percent-encoding de credenciales que bash no decodifica).
+if ! mapfile -t PG_CONF < <(bun -e '
+  try {
+    const u = new URL(process.env.DATABASE_URL || "");
+    const dec = (s) => { try { return decodeURIComponent(s); } catch { return s; } };
+    console.log([u.hostname, u.port || "5432", dec(u.username), decodeURIComponent(u.pathname.replace(/^\/+/, ""))].join("\n"));
+  } catch { process.exit(1); }
+'); then
+  echo "✖ DATABASE_URL no es una URL válida."
   exit 1
 fi
-echo "✔ Base de datos accesible: $RUTA_BD"
+PGHOST="${PG_CONF[0]:-postgres}"
+PGPORT="${PG_CONF[1]:-5432}"
+PGUSER="${PG_CONF[2]:-postgres}"
+PGDATABASE="${PG_CONF[3]:-cig_manufacturing}"
 
 # ------------------------------------------------------------
-# 3) Esquema (db push): fallo aquí = arranque detenido
+# 3) Esperar al servidor de PostgreSQL (pg_isready, hasta 120 s)
 # ------------------------------------------------------------
-echo "▶ Aplicando esquema de base de datos…"
-bunx prisma db push --skip-generate
-echo "✔ Esquema aplicado"
+echo "▶ Esperando PostgreSQL en ${PGHOST}:${PGPORT} (base: ${PGDATABASE})…"
+espera=0
+until pg_isready -q -h "$PGHOST" -p "$PGPORT" -d "$PGDATABASE"; do
+  espera=$((espera + 2))
+  if [ "$espera" -ge 120 ]; then
+    echo "✖ PostgreSQL no acepta conexiones tras 120 s (${PGHOST}:${PGPORT})."
+    echo "  Diagnóstico: docker compose logs postgres"
+    exit 1
+  fi
+  sleep 2
+done
+echo "✔ PostgreSQL acepta conexiones"
 
 # ------------------------------------------------------------
-# 4) Semilla: roles/config idempotentes; ADMIN solo en BD vacía
+# 4) Migraciones (migrate deploy): fallo aquí = arranque detenido.
+#    Auditable e idempotente: cada migración queda registrada en la
+#    tabla _prisma_migrations de la base.
+# ------------------------------------------------------------
+echo "▶ Aplicando migraciones de base de datos…"
+bunx prisma migrate deploy
+echo "✔ Migraciones aplicadas"
+
+# ------------------------------------------------------------
+# 5) Semilla: roles/config idempotentes; ADMIN solo en BD vacía
 # ------------------------------------------------------------
 echo "▶ Sembrando roles y configuración…"
 bun prisma/seed.ts
 echo "✔ Semilla aplicada"
 
 # ------------------------------------------------------------
-# 5) Servidor standalone (compilado en la imagen) con bun
+# 6) Servidor standalone (compilado en la imagen) con bun
 # ------------------------------------------------------------
 SERVER_JS="$(find .next/standalone -maxdepth 5 -name server.js -not -path '*node_modules*' | head -1)"
 if [ -z "$SERVER_JS" ]; then

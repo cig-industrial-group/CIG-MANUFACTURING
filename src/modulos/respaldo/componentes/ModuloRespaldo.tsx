@@ -118,8 +118,13 @@ function traducirError(e: unknown, t: (k: string) => string): string {
       "ARCHIVO_NO_DISPONIBLE",
       "ARCHIVO_INVALIDO",
       "ARCHIVO_VACIO",
-      "ARCHIVO_NO_SQLITE",
+      "ARCHIVO_NO_RESPALDO",
       "ARCHIVO_MUY_GRANDE",
+      "HERRAMIENTA_PG_NO_DISPONIBLE",
+      "RESPALDO_PERMISO_CREATEDB",
+      "RESPALDO_FALLIDO",
+      "URL_BD_INVALIDA",
+      "BD_NO_DISPONIBLE",
       "VENTANA_EXPIRADA",
       "NADA_QUE_REVERTIR",
       "SNAPSHOT_NO_DISPONIBLE",
@@ -504,7 +509,7 @@ export function ModuloRespaldo() {
   async function subirYRestaurar() {
     if (!archivoSubida) return;
     const objetivo = archivoSubida;
-    if (!objetivo.name.toLowerCase().endsWith(".db")) {
+    if (!objetivo.name.toLowerCase().endsWith(".dump")) {
       toast({ description: t("respaldo.errARCHIVO_INVALIDO"), variant: "destructive" });
       return;
     }
@@ -715,12 +720,12 @@ export function ModuloRespaldo() {
               <input
                 ref={entradaArchivo}
                 type="file"
-                accept=".db"
+                accept=".dump"
                 className="hidden"
                 aria-label={t("respaldo.elegirArchivo")}
                 onChange={(e) => {
                   const elegido = e.target.files?.[0] ?? null;
-                  if (elegido && !elegido.name.toLowerCase().endsWith(".db")) {
+                  if (elegido && !elegido.name.toLowerCase().endsWith(".dump")) {
                     toast({ description: t("respaldo.errARCHIVO_INVALIDO"), variant: "destructive" });
                     e.target.value = "";
                     return;
@@ -834,7 +839,8 @@ export function ModuloRespaldo() {
                               {tamano(r.tamanoBytes)}
                             </TableCell>
                             <TableCell className="hidden text-sm text-muted-foreground lg:table-cell">
-                              {f.entero(r.totalRegistros)}
+                              {/* SUBIDO/DETECTADO: el conteo se verifica al restaurar */}
+                              {r.totalRegistros > 0 ? f.entero(r.totalRegistros) : "—"}
                             </TableCell>
                             <TableCell className="text-right">
                               <div className="flex justify-end gap-1">

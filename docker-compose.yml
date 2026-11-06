@@ -1,37 +1,84 @@
 # ============================================================
-# CIG-MANUFACTURING — Orquestación con Docker
+# CIG-MANUFACTURING — Orquestación con Docker (app + PostgreSQL)
 #
-#   Genera el secreto ANTES de levantar (obligatorio):
+#   Genera los secretos ANTES de levantar (obligatorio):
 #     export AUTH_SECRET="$(openssl rand -hex 32)"
+#     export POSTGRES_PASSWORD="$(openssl rand -hex 24)"
 #
 #   Primera vez:   docker compose up -d --build
 #   Ver logs:      docker compose logs -f
 #   Detener:       docker compose down
-#   Respaldo BD:   docker compose exec cig-manufacturing sqlite3 /data/cig-manufacturing.db ".backup '/tmp/respaldo.db'"
-#                  (luego: docker compose cp cig-manufacturing:/tmp/respaldo.db ./respaldo.db)
 #
-# AUTH_SECRET es OBLIGATORIO: si no está definido en el entorno,
-# compose se niega a levantar el servicio (no hay valor por defecto).
+# AUTH_SECRET y POSTGRES_PASSWORD son OBLIGATORIOS: si no están
+# definidos en el entorno, compose se niega a levantar los servicios
+# (no hay valores por defecto — sin secretos horneados).
+#
+# El servidor de base de datos NO publica puertos al host: la app
+# habla con él por la red interna de compose. Solo la app expone
+# 3000. El volumen cig-pg-data preserva la base entre recreaciones;
+# el volumen cig-manufacturing-data preserva respaldos/branding.
 #
 # ADMIN_PASSWORD (opcional): solo se usa en la PRIMERA instalación
-# (base de datos sin usuarios) para fijar la contraseña del administrador.
-# Si no se define, se genera una aleatoria y queda en
+# (base de datos sin usuarios) para fijar la contraseña del
+# administrador. Si no se define, se genera una aleatoria y queda en
 # /data/credenciales-iniciales.txt (permisos 600) dentro del volumen.
+#
+# MIGRACIÓN DE DATOS LEGACY (instalación existente): tras el primer
+# arranque, ejecuta el script de migración de datos de scripts/ (ver su
+# encabezado) apuntando al archivo .db de la instalación anterior.
 # ============================================================
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: cig-postgres
+    restart: unless-stopped
+    environment:
+      # ⚠ Obligatorio. Sin fallback: compose falla si falta.
+      POSTGRES_USER: cig_manufacturing
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD no definido — generalo con: openssl rand -hex 24}"
+      # Base de datos de la aplicación (el usuario de arriba es
+      # superusuario del contenedor: satisface CREATEDB que exige la
+      # restauración en caliente del módulo Respaldo).
+      POSTGRES_DB: cig_manufacturing
+    volumes:
+      - cig-pg-data:/var/lib/postgresql/data
+    # Memoria compartida para operaciones internas del servidor
+    # (ordenamientos de volcados grandes).
+    shm_size: 128mb
+    # Salud: pg_isready contra la base de la app (revisado por la app
+    # antes de aplicar migraciones — condition: service_healthy).
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cig_manufacturing -d cig_manufacturing"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    # Endurecimiento: sin puertos publicados (solo red interna de
+    # compose) y sin escalada de privilegios.
+    security_opt:
+      - no-new-privileges:true
+
   cig-manufacturing:
     build: .
     container_name: cig-manufacturing
     restart: unless-stopped
     ports:
       - "3000:3000"          # app:puerto host → cambia el de la izquierda si el 3000 está ocupado
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       # ⚠ Obligatorio. Sin fallback: compose falla si falta.
       #    Genera tu clave:  openssl rand -hex 32
       AUTH_SECRET: "${AUTH_SECRET:?AUTH_SECRET no definido — generalo con: openssl rand -hex 32}"
-      # connection_limit=1 (Fase 2): pool de una conexión SQLite; la app
-      # también lo fuerza por código al arrancar (defensa en profundidad).
-      DATABASE_URL: file:/data/cig-manufacturing.db?connection_limit=1
+      # Conexión al servidor de BD por la red interna de compose.
+      # El pool lo administra Prisma nativamente (sin connection_limit
+      # forzado — fin del endurecimiento pool=1 del motor de archivo anterior).
+      DATABASE_URL: postgresql://cig_manufacturing:${POSTGRES_PASSWORD}@postgres:5432/cig_manufacturing?schema=public
+      # Raíz de los archivos locales de la máquina (respaldos,
+      # branding, credenciales) — volumen persistente.
+      DATA_DIR: /data
+      BRANDING_DIR: /data/branding
       NODE_ENV: production
       # Contraseña del ADMIN inicial (opcional, solo primera instalación):
       # ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
@@ -46,4 +93,5 @@ services:
       - no-new-privileges:true
 
 volumes:
+  cig-pg-data:
   cig-manufacturing-data:

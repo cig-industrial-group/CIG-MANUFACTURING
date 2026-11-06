@@ -1,6 +1,6 @@
 # 01 — Introducción y Principios
 
-> **Proyecto:** CIG-MANUFACTURING · **Versión documentada:** 1.1.1 · **Rama:** `main`
+> **Proyecto:** CIG-MANUFACTURING · **Versión documentada:** 2.0.0 · **Rama:** `main`
 > Suite de documentación arquitectónica — Parte 1 de 6.
 
 ---
@@ -130,19 +130,22 @@ autónomo. Versiones verificadas en `package.json` (rama `main`):
   `typescript.ignoreBuildErrors` y `eslint.ignoreDuringBuilds` **no** estén activados:
   el build tipa y linta de verdad.
 
-### Prisma ORM + SQLite
+### Prisma ORM + PostgreSQL 16
 
-- **SQLite**: la base de datos es **un archivo** (`db/custom.db` en instalaciones
-  `setup.sh`, `db/production.db` en despliegues `deploy.sh`). Sin servidor de BD que
-  administrar, respaldar, parchear o proteger; copiar el archivo (mejor aún: `VACUUM
-  INTO`) es un respaldo consistente. Justificación completa y alternativas descartadas
-  en [ADR-001](./06-REGISTRO-DECISIONES-ARQUITECTONICAS%20%28ADR%29.md).
+- **PostgreSQL 16+** (requisito obligatorio desde la 2.0.0, ADR-009): la base de
+  datos vive en un servidor propio, direccionado por `DATABASE_URL` con el esquema
+  `postgresql://`. Respaldos consistentes con `pg_dump --format=custom`; la
+  restauración en caliente del módulo Respaldo se apoya en `pg_restore`. La decisión
+  original de la 1.x (motor embebido, ADR-001) quedó reemplazada; el razonamiento
+  histórico y las alternativas descartadas se conservan en el
+  [registro de decisiones (ADR)](./06-REGISTRO-DECISIONES-ARQUITECTONICAS%20%28ADR%29.md).
 - **Prisma 6** con `prisma-client-js`: esquema declarativo en `prisma/schema.prisma`
   (fuente única del modelo de datos, ver
   [04-REFERENCIA-BASE-DATOS.md](./04-REFERENCIA-BASE-DATOS.md)), cliente tipado y
-  `$transaction` para las operaciones compuestas (folios + stock + bitácoras). En este
-  proyecto se usa `prisma db push` (esquema sin historial de migraciones versionadas);
-  la siembra de datos vive en `prisma/seed.ts`.
+  `$transaction` para las operaciones compuestas (folios + stock + bitácoras). El
+  esquema se aplica por **migraciones auditables** (`prisma migrate deploy`, línea
+  base única registrada en `_prisma_migrations`); la siembra de datos vive en
+  `prisma/seed.ts`.
 
 ### Bun
 

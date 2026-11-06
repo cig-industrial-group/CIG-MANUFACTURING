@@ -55,16 +55,19 @@ export async function GET(request: Request) {
     filtros.push({ clienteId });
   }
   if (q) {
+    // mode: "insensitive" — conserva el comportamiento de búsqueda del
+    // motor anterior (LIKE sin distinción de mayúsculas); PostgreSQL LIKE
+    // es sensible a mayúsculas por defecto (usaría ILIKE si no se declara).
     filtros.push({
       OR: [
-        { folio: { contains: q } },
-        { referencia: { contains: q } },
-        { responsable: { contains: q } },
-        { motivo: { contains: q } },
-        { productoSku: { contains: q } },
-        { productoNombre: { contains: q } },
-        { clienteCodigo: { contains: q } },
-        { clienteNombre: { contains: q } },
+        { folio: { contains: q, mode: "insensitive" } },
+        { referencia: { contains: q, mode: "insensitive" } },
+        { responsable: { contains: q, mode: "insensitive" } },
+        { motivo: { contains: q, mode: "insensitive" } },
+        { productoSku: { contains: q, mode: "insensitive" } },
+        { productoNombre: { contains: q, mode: "insensitive" } },
+        { clienteCodigo: { contains: q, mode: "insensitive" } },
+        { clienteNombre: { contains: q, mode: "insensitive" } },
       ],
     });
   }

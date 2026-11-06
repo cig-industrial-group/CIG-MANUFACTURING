@@ -5,6 +5,16 @@ extremo: transforma un servidor virgen en un entorno de producción seguro y
 operativo en menos de 5 minutos (más el tiempo de `apt upgrade` y, con dominio,
 el de compilar Caddy con Go).
 
+> **Motor de datos obligatorio: PostgreSQL 16.** El instalador lo aprovisiona de forma
+> idempotente desde el repositorio oficial PGDG (paso 6), junto con el cliente que
+> exige el módulo de Respaldo (`postgresql-client-16`: `pg_dump`/`pg_restore`/`psql`)
+> y la dependencia de servicio `After/Wants=postgresql.service` (paso 11). Variables
+> de entorno obligatorias: `DATABASE_URL` de PostgreSQL, `DATA_DIR` y `AUTH_SECRET`
+> (generadas por el paso 9; ver [`.env.example`](./.env.example)); en el despliegue
+> Docker se añade `POSTGRES_PASSWORD` (ver `docker-compose.yml` y
+> [docs/05 §6](./docs/05-DESPLIEGUE-Y-OPERACION.md)). Si actualizas desde la v1.1.1,
+> sigue la [guía de migración §8](#8-migración-de-una-instalación-desde-v111-sqlite).
+
 ---
 
 ## Tabla de contenidos
@@ -16,9 +26,10 @@ el de compilar Caddy con Go).
 5. [Verificación post-instalación (criterios de aceptación)](#5-verificación-post-instalación-criterios-de-aceptación)
 6. [Decisiones técnicas y desviaciones documentadas](#6-decisiones-técnicas-y-desviaciones-documentadas)
 7. [Re-ejecución, actualizaciones e idempotencia](#7-re-ejecución-actualizaciones-e-idempotencia)
-8. [Operación: logs, respaldos y mantenimiento](#8-operación-logs-respaldos-y-mantenimiento)
-9. [Solución de problemas](#9-solución-de-problemas)
-10. [Limitaciones y supuestos](#10-limitaciones-y-supuestos)
+8. [Migración de una instalación desde v1.1.1 (SQLite)](#8-migración-de-una-instalación-desde-v111-sqlite)
+9. [Operación: logs, respaldos y mantenimiento](#9-operación-logs-respaldos-y-mantenimiento)
+10. [Solución de problemas](#10-solución-de-problemas)
+11. [Limitaciones y supuestos](#11-limitaciones-y-supuestos)
 
 ---
 
@@ -102,7 +113,16 @@ sudo USE_DOMAIN=s \
    privilegiado** (el script lo verifica y aborta si está en `sudo`/`docker`).
 5. **Bun**: instalado en `/home/cig-manufacturing/.bun` con el instalador
    oficial de bun.sh, como usuario de servicio.
-6. **Caddy**:
+6. **PostgreSQL 16 (PGDG)**: instalación idempotente desde el repositorio
+   oficial (keyring firmado con `[signed-by=]`, sin apt-key deprecado) de
+   `postgresql-16` **+ `postgresql-client-16`** (pg_dump/pg_restore/psql que
+   exige el módulo de Respaldo; cliente ≥ servidor). El servicio queda
+   habilitado y aceptando conexiones **solo en 127.0.0.1:5432** (el puerto
+   jamás se publica en UFW). Después se aprovisionan el rol de aplicación
+   (`LOGIN` + `CREATEDB`, requerido por la restauración en caliente) y su
+   base de datos, de forma idempotente, con la contraseña viajando por
+   stdin (nunca en `argv` ni en consola).
+7. **Caddy**:
    - Con dominio: se instala Go (toolchain oficial) + `xcaddy` y se **compila
      Caddy con el plugin `github.com/caddy-dns/cloudflare`**. Al terminar se
      eliminan Go y las cachés de compilación (menor superficie de ataque).
@@ -113,24 +133,30 @@ sudo USE_DOMAIN=s \
    `node_modules`, `.next`, `download`, `upload` **y el estado de producción**
    (`db/`, `logs/`, `.env`, respaldos). Propiedad recursiva
    `cig-manufacturing:cig-manufacturing`.
-8. **Entorno `.env`** (solo si no existe; en re-ejecuciones se conserva y se
-   valida su `AUTH_SECRET`): `NODE_ENV`, `AUTH_SECRET` (generado con
-   `openssl rand -base64 48`), `DATABASE_URL` absoluta,
-   `INITIAL_ADMIN_PASSWORD`, `NEXTAUTH_URL` (dominio) o `COOKIE_INSEGURA_HTTP=1`
-   (local). Permisos `600`.
-9. **Compilación** (como usuario de servicio, con entorno limpio `env -i`):
-   `bun install --frozen-lockfile` → `bunx prisma generate` → `mkdir db logs` →
-   `bunx prisma db push` → `bunx prisma db seed` → `bun run build` →
-   `mkdir .next/standalone/.next/cache`.
-10. **systemd**: escribe `cig-manufacturing.service` (aislamiento extremo, ver
-    §6) y `caddy.service`, el `Caddyfile` con todas las cabeceras de seguridad
+9. **Entorno `.env`** (solo si no existe; en re-ejecuciones se conserva y se
+   valida su `AUTH_SECRET` **y que su `DATABASE_URL` sea de PostgreSQL** —
+   una instalación previa del motor de archivo debe migrar primero, ver §8):
+   `NODE_ENV`, `AUTH_SECRET` (generado con `openssl rand -base64 48`),
+   `DATABASE_URL` de PostgreSQL con contraseña aleatoria de 192 bits,
+   `DATA_DIR` (respaldos/branding/credenciales), `INITIAL_ADMIN_PASSWORD`,
+   `NEXTAUTH_URL` (dominio) o `COOKIE_INSEGURA_HTTP=1` (local). Permisos `600`.
+10. **Compilación** (como usuario de servicio, con entorno limpio `env -i`):
+   `bun install --frozen-lockfile` → `bunx prisma generate` → `mkdir db logs`
+   → `bunx prisma migrate deploy` (**esquema por migraciones auditables**,
+   registradas en `_prisma_migrations`) → `bunx prisma db seed` →
+   `bun run build` → `mkdir .next/standalone/.next/cache`.
+11. **systemd**: escribe `cig-manufacturing.service` (aislamiento extremo, ver
+    §6; **depende del motor de BD**: `After/Wants=postgresql.service`) y
+    `caddy.service`, el `Caddyfile` con todas las cabeceras de seguridad
     y la rotación de logs; valida el Caddyfile (`caddy validate`) y habilita +
     reinicia ambos servicios.
-11. **Verificación**: espera a que la app responda en `127.0.0.1:<puerto>/api`,
-    comprueba ambos servicios activos y (con dominio) el HTTPS y la cabecera
+12. **Verificación**: comprueba `postgresql` activo y `pg_isready` contra la
+    base de la app, espera a que la app responda en `127.0.0.1:<puerto>/api`,
+    comprueba los servicios activos y (con dominio) el HTTPS y la cabecera
     `Strict-Transport-Security`.
-12. **Resumen final** con dominio/URL, usuarios, contraseña del admin, estado
-    de servicios y advertencia de cambio de contraseña obligatorio.
+13. **Resumen final** con dominio/URL, usuarios, contraseña del admin, estado
+    de los tres servicios (app, postgresql, caddy) y advertencia de cambio de
+    contraseña obligatorio.
 
 ## 5. Verificación post-instalación (criterios de aceptación)
 
@@ -229,8 +255,11 @@ justificadas donde había incompatibilidades técnicas o mejoras de seguridad:
   `.env` ni respaldos (`--delete` con exclusiones protectoras).
 - Un `.env` existente **nunca se sobrescribe** (los secretos se conservan);
   solo se valida su `AUTH_SECRET` y se re-establecen permisos `600`.
-- `prisma db push` sincroniza el esquema; la semilla solo crea el admin si la
-  base está vacía. **Tus datos y usuarios sobreviven.**
+- `prisma migrate deploy` aplica las migraciones pendientes (idempotente y
+  auditable); la semilla solo crea el admin si la base está vacía.
+  **Tus datos y usuarios sobreviven.**
+- El rol y la base de PostgreSQL se reaprovisionan sin destruir datos
+  (DO block idempotente + verificación de existencia de la base).
 - Los servicios se regeneran (unidad + Caddyfile) y se reinician.
 
 **Desplegar una nueva versión del código**:
@@ -241,7 +270,46 @@ git pull origin main
 sudo ./deploy.sh        # recompila y reinicia; conserva datos
 ```
 
-## 8. Operación: logs, respaldos y mantenimiento
+## 8. Migración de una instalación desde v1.1.1 (SQLite)
+
+Si actualizas desde la **v1.1.1** — cuyo motor era SQLite embebido (un
+`production.db`) —, la migración de DATOS es un paso explícito y auditable: nunca
+se hace en silencio ni se fusiona:
+
+```bash
+# 1) Despliega normalmente (crea PostgreSQL, el rol y la base, aplica
+#    migraciones y siembra la configuración inicial):
+sudo ./deploy.sh
+
+# 2) Copia el archivo .db de tu instalación anterior al servidor (legible
+#    por el usuario de servicio) y migra con el bun del propio usuario:
+sudo runuser -u cig-manufacturing -- \
+  /home/cig-manufacturing/.bun/bin/bun \
+  /home/cig-manufacturing/CIG-MANUFACTURING/scripts/migrar-sqlite-a-postgres.ts \
+  /ruta/a/production.db
+```
+
+En entornos de desarrollo/evaluación (con PostgreSQL 16 local ya aprovisionado por
+`setup.sh`), el comando directo equivalente es:
+
+```bash
+bun run scripts/migrar-sqlite-a-postgres.ts /ruta/a/production.db
+```
+
+El script:
+
+- Copia las 21 tablas **dentro de una única transacción** (o entra todo, o no
+  entra nada) y en orden topológico (FKs respetadas).
+- Convierte los tipos por campo según el esquema (booleanos 0/1, fechas ISO,
+  enteros) y conserva **los decimales como texto exacto** y las series de
+  folios (`SecuenciaFolio`): los folios nuevos continúan la serie histórica.
+- **Verifica conteos por tabla al final** (cero discrepancias o aborta).
+- Se **niega** a correr si la base ya tiene datos (fail-fast anti-fusión);
+  `--reemplazar` la vacía explícitamente si necesitas reintentar en pruebas.
+- Te recuerda copiar los respaldos `.dump` antiguos a `DATA_DIR/backups` si
+  quieres que sigan siendo restaurables.
+
+## 9. Operación: logs, respaldos y mantenimiento
 
 ```bash
 systemctl status cig-manufacturing          # estado del servicio
@@ -260,7 +328,7 @@ systemctl list-timers | grep -i logrotate  # rotación de logs activa
 - **Forzar recompilación de Caddy** (p. ej. tras cambiar de modo local a
   dominio en la misma máquina): `sudo rm /usr/local/bin/caddy && sudo ./deploy.sh`.
 
-## 9. Solución de problemas
+## 10. Solución de problemas
 
 | Síntoma | Causa probable / solución |
 |---|---|
@@ -275,7 +343,7 @@ systemctl list-timers | grep -i logrotate  # rotación de logs activa
 | El build se queda sin memoria | El servidor necesita ≥2 GB RAM; añade swap temporal (`fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile`). |
 | `SystemCallFilter` bloquea algo inesperado | El filtro `@system-service` es el exigido por la especificación. Diagnostica con `sudo systemd-analyze syscall-filter @system-service` y revisa `journalctl` buscando `EPERM`. |
 
-## 10. Limitaciones y supuestos
+## 11. Limitaciones y supuestos
 
 - El script asume que **el repositorio ya está clonado** en el directorio
   actual del servidor (no clona por sí mismo).

@@ -11,7 +11,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -101,12 +101,16 @@ model Producto {
   // El stock SIEMPRE vive en la unidad base; el empaque es solo una
   // forma de capturar y desplegar el conteo (3 PAQ × 10 + 2 PZA = 32 PZA).
   // ===== INTEGRIDAD NUMÉRICA (remediación Fase 1) =====
-  // Las cantidades, costos y medidas se almacenan como TEXTO decimal
-  // exacto (nunca Float/Double: SQLite persistiría REAL/float64 y la
-  // aritmética acumularía errores de redondeo — p. ej. 0.1+0.1+0.1 =
-  // 0.30000000000000004). Toda la aritmética se hace con Decimal exacto
-  // en la capa de aplicación (src/lib/numerico.ts). Al migrar a
-  // PostgreSQL estos campos pueden pasar a NUMERIC sin cambio de código.
+  // ADR «Decimales como String/TEXT sobre PostgreSQL»: las cantidades,
+  // costos y medidas se almacenan como TEXTO decimal exacto (String en
+  // Prisma). PostgreSQL dispone de NUMERIC, pero migrar las columnas a
+  // Decimal cambiaría el contrato de tipos en runtime (String → Prisma.Decimal)
+  // y forzaría una refactorización de src/lib/numerico.ts y de toda la UI
+  // que hoy consume `string`, lo que viola la regla de no tocar la lógica
+  // de negocio durante la migración de motor. Toda la aritmética sigue
+  // haciéndose con Decimal exacto en la capa de aplicación (numerico.ts:
+  // fail-closed, forma canónica, comparaciones exactas), por lo que la
+  // integridad numérica queda garantizada sin alterar el contrato.
   unidadPaquete    String? // código de la unidad de paquete del catálogo (PAQ, CJA...)
   contenidoPaquete String? // unidades base que contiene cada paquete ("10"; decimal exacto)
 
@@ -494,23 +498,26 @@ model RegistroRechazo {
 // ============================================================
 // MÓDULO: RESPALDO / BACKUP
 // Respaldo completo de la base de datos (instantánea consistente
-// vía VACUUM INTO) y restauración EN CALIENTE con reversión:
+// vía pg_dump, formato custom de PostgreSQL) y restauración EN
+// CALIENTE con reversión:
 //   · Cada restauración crea un snapshot pre-restauración y queda
 //     registrada aquí (auditoría de fábrica).
-//   · Si la restauración falla a mitad de operación, la copia
-//     transaccional revierte TODO: la base queda intacta.
+//   · Si la restauración falla a mitad de operación, la transacción
+//     de copia revierte TODO: la base queda intacta.
 //   · Si tiene éxito, hay una ventana de 24 horas para revertirla
 //     (restaurando el snapshot pre-restauración).
 // Ambos registros son REGISTROS DE LA MÁQUINA (describen archivos
-// en db/backups/): se EXCLUYEN de la copia al restaurar, de modo
-// que el inventario de respaldos siempre coincida con el disco.
+// en el directorio de respaldos): se EXCLUYEN de la copia al
+// restaurar, de modo que el inventario de respaldos siempre
+// coincida con el disco.
 // ============================================================
 
-// Un archivo de respaldo en db/backups/. El archivo es una copia
-// byte-consistente de la base de datos completa.
+// Un archivo de respaldo en <DATA_DIR>/backups/. El archivo es un
+// volcado pg_dump (formato custom de PostgreSQL, comprimido) de la
+// base de datos completa.
 model RespaldoBD {
   id             String   @id @default(cuid())
-  archivo        String   @unique // nombre del archivo en db/backups/
+  archivo        String   @unique // nombre del archivo en DATA_DIR/backups/
   tipo           String // MANUAL | AUTOMATICO | PRE_RESTAURACION | DETECTADO | SUBIDO
   etiqueta       String? // nota visible para el usuario
   tamanoBytes    Int      @default(0)

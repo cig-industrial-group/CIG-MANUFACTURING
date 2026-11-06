@@ -1,5 +1,5 @@
 # ============================================================
-# CI — CIG-MANUFACTURING v1.0.0
+# CI — CIG-MANUFACTURING v1.1.1
 #
 # Pipeline quirúrgico que se ejecuta en cada push (cualquier rama) y PR:
 #   1. Guardia  → typescript.ignoreBuildErrors (y eslint.ignoreDuringBuilds)
@@ -12,9 +12,16 @@
 #   5. Build    → next build con verificación de tipos activa.
 #   6. Tipos    → tsc --noEmit (reporta TODOS los errores, no solo el
 #                 primero como hace next build).
-#   7. Humo     → BD SQLite efímera + semilla + servidor standalone real:
-#                 GET /api, login admin, sesión con cookie firmada y
-#                 límite de intentos de login (429).
+#   7. Humo     → BD PostgreSQL 16 efímera (servicio contenedor del
+#                 runner) + migraciones + semilla + servidor standalone
+#                 real: GET /api, login admin, sesión con cookie firmada
+#                 y límite de intentos de login (429).
+#
+# SECRETOS DE CI: AUTH_SECRET y ADMIN_PASSWORD se generan ALEATORIOS en
+# cada ejecución (openssl rand) y viajan por GITHUB_ENV — jamás se
+# publican valores fijos en el repositorio. La contraseña del
+# servicio contenedor de BD existe SOLO dentro del runner efímero
+# (localhost, destruido al terminar el job) y no protege nada real.
 #
 # Versión de Bun fijada a la usada en desarrollo y en la imagen Docker
 # (reproducibilidad: mismo runtime en build, pruebas y ejecución).
@@ -38,11 +45,6 @@ permissions:
 
 env:
   NEXT_TELEMETRY_DISABLED: "1"
-  # Secreto EFÍMERO exclusivo de pruebas (64 hex; no es de producción
-  # y jamás firma nada fuera de los runners de CI).
-  AUTH_SECRET: "a9f3c1d85e7b24608f4a2c9e6b1d73580e4c2f9a5b8d3e127c6a0f4b9e2d85c31"
-  # Contraseña del administrador que siembra la BD efímera de pruebas
-  ADMIN_PASSWORD: "CiPruebas*2026"
   PORT: "3100"
   HOSTNAME: "127.0.0.1"
 
@@ -51,6 +53,24 @@ jobs:
     name: "Calidad, tipos, build y humo"
     runs-on: ubuntu-latest
     timeout-minutes: 20
+
+    # Motor de datos de pruebas: PostgreSQL 16 (igual que producción —
+    # docker-compose/postgres:16). Contenedor efímero del runner, solo
+    # escucha en localhost del propio runner y se destruye al terminar.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cig_ci
+          POSTGRES_PASSWORD: cig_ci_efimera_localrunner
+          POSTGRES_DB: cig_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cig_ci -d cig_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: "Descargar código"
@@ -124,8 +144,15 @@ jobs:
           [ "$PROBLEMA" = "0" ] && echo "OK: sin fallbacks de secretos ni credenciales publicadas"
 
       # ── 3. ESQUEMA ─────────────────────────────────────────────
-      - name: "Definir base de datos efímera de pruebas"
-        run: echo "DATABASE_URL=file:${RUNNER_TEMP}/cig-ci.db" >> "$GITHUB_ENV"
+      - name: "Secretos efímeros aleatorios y BD de pruebas"
+        run: |
+          # Secretos ALEATORIOS de esta ejecución (nada publicado en el repo).
+          echo "AUTH_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          # Política de la semilla: ≥8 caracteres, letra y número.
+          echo "ADMIN_PASSWORD=Ci-$(openssl rand -hex 12)" >> "$GITHUB_ENV"
+          echo "DATABASE_URL=postgresql://cig_ci:cig_ci_efimera_localrunner@127.0.0.1:5432/cig_ci?schema=public" >> "$GITHUB_ENV"
+          echo "DATA_DIR=${RUNNER_TEMP}/cig-ci-datos" >> "$GITHUB_ENV"
+          mkdir -p "${RUNNER_TEMP}/cig-ci-datos"
 
       - name: "Esquema Prisma (validate + generate)"
         run: |
@@ -146,9 +173,9 @@ jobs:
         run: ./node_modules/.bin/tsc --noEmit
 
       # ── 7. HUMO (servidor real con BD real) ────────────────────
-      - name: "Humo: crear esquema y sembrar datos"
+      - name: "Humo: migraciones + sembrar datos"
         run: |
-          bunx prisma db push --skip-generate
+          bunx prisma migrate deploy
           ADMIN_PASSWORD="$ADMIN_PASSWORD" bun prisma/seed.ts
 
       - name: "Humo: servidor standalone + API + login + sesión + rate-limit"

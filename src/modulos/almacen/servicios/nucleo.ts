@@ -255,8 +255,9 @@ async function aplicarEfectoStockTx(
     if (!cuerpo.almacenDestinoId) throw new ErrorNegocio("ALMACEN_DESTINO_REQUERIDO");
     almacenDestino = await tx.almacen.findUnique({ where: { id: cuerpo.almacenDestinoId } });
     if (!almacenDestino || !almacenDestino.activo) throw new ErrorNegocio("ALMACEN_INVALIDO");
-    // Lectura-modificación-escritura DENTRO de la transacción (SQLite
-    // serializa escritores): la acumulación es Decimal exacta, nunca SQL REAL.
+    // Lectura-modificación-escritura DENTRO de la transacción (el motor
+    // anterior serializaba a los escritores): la acumulación es Decimal
+    // exacta, nunca SQL REAL.
     const retiro = cantidad.abs();
     let stock = await tx.stock.findUnique({
       where: { productoId_almacenId: { productoId, almacenId: almacenDestino.id } },

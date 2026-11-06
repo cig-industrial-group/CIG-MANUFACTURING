@@ -1,106 +1,134 @@
+-- ============================================================================
+-- LÍNEA BASE POSTGRESQL (migración de motor SQLite → PostgreSQL, v1.1.1)
+-- ----------------------------------------------------------------------------
+-- Squash auditado de las migraciones de la era SQLite
+-- (20261105154921_linea_base_original + 20261105155046_integridad_numerica_
+-- decimal), regeneradas íntegras desde prisma/schema.prisma con
+-- `prisma migrate diff --from-empty --to-schema-datamodel`.
+--
+-- Los DATOS de instalaciones existentes NO se pierden: scripts/migrar-
+-- sqlite-a-postgres.ts los copia desde el archivo .db legacy tras aplicar
+-- esta línea base (verificación de conteos por tabla, fail-fast).
+--
+-- ADR «Decimales como String/TEXT»: las cantidades/costos/medidas siguen
+-- siendo texto decimal exacto; la aritmética vive en src/lib/numerico.ts.
+-- ============================================================================
+-- CreateSchema
+CREATE SCHEMA IF NOT EXISTS "public";
+
 -- CreateTable
 CREATE TABLE "Rol" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "clave" TEXT NOT NULL,
     "nombre" TEXT NOT NULL,
     "nombreEn" TEXT NOT NULL,
     "descripcion" TEXT,
     "permisos" TEXT NOT NULL,
     "sistema" BOOLEAN NOT NULL DEFAULT false,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Rol_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Usuario" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "nombre" TEXT NOT NULL,
     "correo" TEXT NOT NULL,
     "passwordHash" TEXT NOT NULL,
     "rolId" TEXT NOT NULL,
     "activo" BOOLEAN NOT NULL DEFAULT true,
     "debeCambiarPassword" BOOLEAN NOT NULL DEFAULT false,
-    "ultimoAcceso" DATETIME,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "Usuario_rolId_fkey" FOREIGN KEY ("rolId") REFERENCES "Rol" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+    "ultimoAcceso" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Usuario_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Restablecimiento" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "usuarioId" TEXT NOT NULL,
     "codigoHash" TEXT NOT NULL,
-    "expiraEn" DATETIME NOT NULL,
-    "usadoEn" DATETIME,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "Restablecimiento_usuarioId_fkey" FOREIGN KEY ("usuarioId") REFERENCES "Usuario" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    "expiraEn" TIMESTAMP(3) NOT NULL,
+    "usadoEn" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "Restablecimiento_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Configuracion" (
-    "clave" TEXT NOT NULL PRIMARY KEY,
-    "valor" TEXT NOT NULL
+    "clave" TEXT NOT NULL,
+    "valor" TEXT NOT NULL,
+
+    CONSTRAINT "Configuracion_pkey" PRIMARY KEY ("clave")
 );
 
 -- CreateTable
 CREATE TABLE "Almacen" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "codigo" TEXT NOT NULL,
     "nombre" TEXT NOT NULL,
     "ubicacion" TEXT,
     "tipo" TEXT NOT NULL DEFAULT 'GENERAL',
     "responsable" TEXT,
     "activo" BOOLEAN NOT NULL DEFAULT true,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Almacen_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Producto" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "sku" TEXT NOT NULL,
     "nombre" TEXT NOT NULL,
     "descripcion" TEXT,
     "categoria" TEXT NOT NULL DEFAULT 'MATERIA_PRIMA',
     "unidad" TEXT NOT NULL DEFAULT 'PZA',
     "unidadPaquete" TEXT,
-    "contenidoPaquete" REAL,
-    "stockMinimo" REAL NOT NULL DEFAULT 0,
-    "costoUnitario" REAL,
+    "contenidoPaquete" TEXT,
+    "stockMinimo" TEXT NOT NULL DEFAULT '0',
+    "costoUnitario" TEXT,
     "activo" BOOLEAN NOT NULL DEFAULT true,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Producto_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Stock" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "productoId" TEXT NOT NULL,
     "almacenId" TEXT NOT NULL,
-    "cantidad" REAL NOT NULL DEFAULT 0,
-    "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "Stock_productoId_fkey" FOREIGN KEY ("productoId") REFERENCES "Producto" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
-    CONSTRAINT "Stock_almacenId_fkey" FOREIGN KEY ("almacenId") REFERENCES "Almacen" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    "cantidad" TEXT NOT NULL DEFAULT '0',
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Stock_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Movimiento" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "folio" TEXT NOT NULL,
     "tipo" TEXT NOT NULL,
     "productoId" TEXT NOT NULL,
     "almacenOrigenId" TEXT,
     "almacenDestinoId" TEXT,
-    "cantidad" REAL NOT NULL,
-    "cantidadDespues" REAL,
+    "cantidad" TEXT NOT NULL,
+    "cantidadDespues" TEXT,
     "motivo" TEXT,
     "referencia" TEXT,
     "responsable" TEXT,
     "usuarioId" TEXT,
     "usuarioNombre" TEXT,
     "editado" BOOLEAN NOT NULL DEFAULT false,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "productoSku" TEXT NOT NULL DEFAULT '',
     "productoNombre" TEXT NOT NULL DEFAULT '',
     "productoUnidad" TEXT NOT NULL DEFAULT '',
@@ -113,12 +141,14 @@ CREATE TABLE "Movimiento" (
     "clienteNombre" TEXT,
     "salidaId" TEXT,
     "salidaFolio" TEXT,
-    "conteoDetalle" TEXT
+    "conteoDetalle" TEXT,
+
+    CONSTRAINT "Movimiento_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "CorreccionMovimiento" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "movimientoId" TEXT,
     "folio" TEXT NOT NULL,
     "salidaId" TEXT,
@@ -129,20 +159,24 @@ CREATE TABLE "CorreccionMovimiento" (
     "motivo" TEXT,
     "usuarioId" TEXT,
     "usuarioNombre" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "CorreccionMovimiento_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "SecuenciaFolio" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "clave" TEXT NOT NULL,
     "ultimo" INTEGER NOT NULL,
-    "updatedAt" DATETIME NOT NULL
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "SecuenciaFolio_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "UnidadMedida" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "codigo" TEXT NOT NULL,
     "nombre" TEXT NOT NULL,
     "nombreEn" TEXT NOT NULL,
@@ -151,46 +185,50 @@ CREATE TABLE "UnidadMedida" (
     "notas" TEXT,
     "activo" BOOLEAN NOT NULL DEFAULT true,
     "esSistema" BOOLEAN NOT NULL DEFAULT false,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "UnidadMedida_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Modelo" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "codigo" TEXT NOT NULL,
     "nombre" TEXT NOT NULL,
     "descripcion" TEXT,
     "activo" BOOLEAN NOT NULL DEFAULT true,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Modelo_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "NumeroParte" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "numero" TEXT NOT NULL,
     "nombre" TEXT NOT NULL,
     "descripcion" TEXT,
     "activo" BOOLEAN NOT NULL DEFAULT true,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "NumeroParte_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "ModeloParte" (
     "modeloId" TEXT NOT NULL,
     "numeroParteId" TEXT NOT NULL,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    PRIMARY KEY ("modeloId", "numeroParteId"),
-    CONSTRAINT "ModeloParte_modeloId_fkey" FOREIGN KEY ("modeloId") REFERENCES "Modelo" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
-    CONSTRAINT "ModeloParte_numeroParteId_fkey" FOREIGN KEY ("numeroParteId") REFERENCES "NumeroParte" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    CONSTRAINT "ModeloParte_pkey" PRIMARY KEY ("modeloId","numeroParteId")
 );
 
 -- CreateTable
 CREATE TABLE "Cliente" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "codigo" TEXT NOT NULL,
     "nombre" TEXT NOT NULL,
     "contacto" TEXT,
@@ -199,13 +237,15 @@ CREATE TABLE "Cliente" (
     "direccion" TEXT,
     "notas" TEXT,
     "activo" BOOLEAN NOT NULL DEFAULT true,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Cliente_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Papelera" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "entidad" TEXT NOT NULL,
     "entidadId" TEXT NOT NULL,
     "identificador" TEXT NOT NULL,
@@ -214,17 +254,19 @@ CREATE TABLE "Papelera" (
     "estado" TEXT NOT NULL DEFAULT 'EN_PAPELERA',
     "usuarioId" TEXT,
     "usuarioNombre" TEXT,
-    "eliminadoEn" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "expiraEn" DATETIME NOT NULL,
-    "restauradoEn" DATETIME,
+    "eliminadoEn" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "expiraEn" TIMESTAMP(3) NOT NULL,
+    "restauradoEn" TIMESTAMP(3),
     "restauradoPor" TEXT,
-    "purgadoEn" DATETIME,
-    "purgadoPor" TEXT
+    "purgadoEn" TIMESTAMP(3),
+    "purgadoPor" TEXT,
+
+    CONSTRAINT "Papelera_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "SalidaOQC" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "folio" TEXT NOT NULL,
     "clienteId" TEXT,
     "clienteCodigo" TEXT,
@@ -238,15 +280,17 @@ CREATE TABLE "SalidaOQC" (
     "usuarioId" TEXT,
     "usuarioNombre" TEXT,
     "estado" TEXT NOT NULL DEFAULT 'EMITIDA',
-    "eliminadaEn" DATETIME,
+    "eliminadaEn" TIMESTAMP(3),
     "eliminadaPor" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "SalidaOQC_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "RegistroScrap" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "folio" TEXT NOT NULL,
     "productoId" TEXT NOT NULL,
     "productoSku" TEXT NOT NULL,
@@ -255,7 +299,7 @@ CREATE TABLE "RegistroScrap" (
     "almacenId" TEXT,
     "almacenCodigo" TEXT,
     "almacenNombre" TEXT,
-    "cantidad" REAL NOT NULL,
+    "cantidad" TEXT NOT NULL,
     "motivo" TEXT NOT NULL,
     "notas" TEXT,
     "responsable" TEXT,
@@ -263,13 +307,15 @@ CREATE TABLE "RegistroScrap" (
     "usuarioNombre" TEXT,
     "movimientoId" TEXT,
     "conteoDetalle" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "RegistroScrap_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "RegistroRechazo" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "folio" TEXT NOT NULL,
     "productoId" TEXT NOT NULL,
     "productoSku" TEXT NOT NULL,
@@ -280,46 +326,52 @@ CREATE TABLE "RegistroRechazo" (
     "clienteNombre" TEXT,
     "salidaId" TEXT,
     "salidaFolio" TEXT,
-    "cantidad" REAL NOT NULL,
+    "cantidad" TEXT NOT NULL,
     "motivo" TEXT NOT NULL,
     "disposicion" TEXT NOT NULL DEFAULT 'PENDIENTE',
     "notas" TEXT,
     "responsable" TEXT,
     "usuarioId" TEXT,
     "usuarioNombre" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "RegistroRechazo_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "RespaldoBD" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "archivo" TEXT NOT NULL,
     "tipo" TEXT NOT NULL,
     "etiqueta" TEXT,
     "tamanoBytes" INTEGER NOT NULL DEFAULT 0,
     "totalRegistros" INTEGER NOT NULL DEFAULT 0,
     "compatible" BOOLEAN NOT NULL DEFAULT true,
-    "creadoEn" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "creadoPor" TEXT
+    "creadoEn" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "creadoPor" TEXT,
+
+    CONSTRAINT "RespaldoBD_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "RestauracionBD" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "respaldoArchivo" TEXT NOT NULL,
     "snapshotPre" TEXT,
     "tipo" TEXT NOT NULL DEFAULT 'RESTAURACION',
     "estado" TEXT NOT NULL DEFAULT 'EN_PROGRESO',
     "reversionDeId" TEXT,
-    "revertidaEn" DATETIME,
-    "iniciadaEn" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "completadaEn" DATETIME,
-    "ventanaReversaHasta" DATETIME,
+    "revertidaEn" TIMESTAMP(3),
+    "iniciadaEn" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "completadaEn" TIMESTAMP(3),
+    "ventanaReversaHasta" TIMESTAMP(3),
     "ejecutadaPor" TEXT,
     "totalRegistros" INTEGER NOT NULL DEFAULT 0,
     "duracionMs" INTEGER NOT NULL DEFAULT 0,
-    "error" TEXT
+    "error" TEXT,
+
+    CONSTRAINT "RestauracionBD_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
@@ -456,3 +508,22 @@ CREATE INDEX "RestauracionBD_estado_iniciadaEn_idx" ON "RestauracionBD"("estado"
 
 -- CreateIndex
 CREATE INDEX "RestauracionBD_reversionDeId_idx" ON "RestauracionBD"("reversionDeId");
+
+-- AddForeignKey
+ALTER TABLE "Usuario" ADD CONSTRAINT "Usuario_rolId_fkey" FOREIGN KEY ("rolId") REFERENCES "Rol"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Restablecimiento" ADD CONSTRAINT "Restablecimiento_usuarioId_fkey" FOREIGN KEY ("usuarioId") REFERENCES "Usuario"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Stock" ADD CONSTRAINT "Stock_productoId_fkey" FOREIGN KEY ("productoId") REFERENCES "Producto"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Stock" ADD CONSTRAINT "Stock_almacenId_fkey" FOREIGN KEY ("almacenId") REFERENCES "Almacen"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ModeloParte" ADD CONSTRAINT "ModeloParte_modeloId_fkey" FOREIGN KEY ("modeloId") REFERENCES "Modelo"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ModeloParte" ADD CONSTRAINT "ModeloParte_numeroParteId_fkey" FOREIGN KEY ("numeroParteId") REFERENCES "NumeroParte"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
