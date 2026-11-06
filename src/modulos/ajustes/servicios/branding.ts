@@ -13,12 +13,10 @@
  *
  * Gestión del logo y el favicon personalizados del sistema:
  *
- * · Almacenamiento: directorio `branding/` en la raíz de la aplicación
- *   (fuera de `public/` para que los builds no lo regeneren ni lo
- *   sobrescriban). Se resuelve como hermana del directorio que contiene
- *   la base de datos (…/CIG-MANUFACTURING/db/custom.db →
- *   …/CIG-MANUFACTURING/branding). La variable BRANDING_DIR permite
- *   reubicarlo (p. ej. contenedores Docker con volumen /data).
+ * · Almacenamiento: directorio `branding/` bajo DATA_DIR (fuera de
+ *   `public/` para que los builds no lo regeneren ni lo sobrescriban).
+ *   La variable BRANDING_DIR permite reubicarlo por separado (p. ej.
+ *   instalaciones que montan volúmenes distintos).
  *
  * · Nombres fijos por diseño: solo existen `logo.png|svg|jpg` y
  *   `favicon.ico|png`. Ningún nombre proveniente del usuario toca el
@@ -36,7 +34,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { db } from "@/lib/db";
+import { db, directorioDatos } from "@/lib/db";
 import { ErrorNegocio } from "@/modulos/almacen/servicios/nucleo";
 
 // ============================================================
@@ -85,25 +83,20 @@ interface ArchivoValidado {
 }
 
 // ============================================================
-// RUTAS DE ARCHIVOS
+// RUTAS DE ARCHIVOS (DATA_DIR — misma raíz canónica que los respaldos)
 // ============================================================
 
-/** Ruta absoluta del archivo de la base de datos (misma resolución que el módulo Respaldo) */
-function rutaBaseDatos(): string {
-  const url = process.env.DATABASE_URL ?? "file:./db/custom.db";
-  const limpia = url.replace(/^file:/, "").split("?")[0];
-  return path.isAbsolute(limpia) ? limpia : path.resolve(process.cwd(), limpia);
-}
-
 /**
- * Carpeta de branding: raíz de la aplicación (hermana del directorio de
- * la BD). Reubicable con BRANDING_DIR (p. ej. Docker: /data/branding).
+ * Carpeta de branding: bajo DATA_DIR (misma raíz de archivos locales
+ * de la máquina que los respaldos: todo el estado persistente de la
+ * app vive bajo un único directorio reubicable). Reubicable además
+ * con BRANDING_DIR (p. ej. instalaciones que separan los volúmenes).
  */
 export function carpetaBranding(): string {
   if (process.env.BRANDING_DIR) {
     return path.resolve(process.env.BRANDING_DIR);
   }
-  return path.join(path.dirname(path.dirname(rutaBaseDatos())), "branding");
+  return path.join(directorioDatos(), "branding");
 }
 
 /** Ruta de un archivo dentro de branding/ (nombre siempre del catálogo fijo) */

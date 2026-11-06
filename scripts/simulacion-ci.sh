@@ -11,37 +11,92 @@
 # SIMULACIÓN LOCAL DEL PIPELINE DE CI
 # Replica .github/workflows/ci.yml sin necesidad de GitHub:
 #   guardia de config -> guardia de secretos -> prisma -> lint ->
-#   build -> tipos -> humo real (BD efímera + semilla + servidor
-#   standalone + API + login + sesión + rate-limit)
+#   build -> tipos -> humo real (BD PostgreSQL efímera + migraciones +
+#   semilla + servidor standalone + API + login + sesión + rate-limit)
 #
 # Uso (desde la raíz del proyecto, en un checkout limpio):
 #   bash scripts/simulacion-ci.sh
 #
-# Nota: no usa rutas absolutas del entorno; crea su BD temporal
-# en un directorio efímero y limpia todo al salir.
+# Requisito: PostgreSQL 16+ local accesible (igual que el CI real, que
+# usa el servicio contenedor postgres:16). La simulación crea una base
+# EFÍMERA y la ELIMINA al salir; los secretos se generan ALEATORIOS en
+# cada ejecución (el repositorio no publica valores fijos).
 # ============================================================
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+paso() { echo ""; echo "──── $1 ────"; }
+fallo() { echo "  ✘ $1" >&2; exit 1; }
+fallo_postgres() {
+  echo "  ✘ La simulación necesita PostgreSQL 16+ local accesible" >&2
+  echo "    (sudo -n -u postgres psql, o superusuario por TCP en" >&2
+  echo "     \"${PG_HOST}:${PG_PUERTO}\"). Es la réplica del servicio" >&2
+  echo "    postgres:16 que usa el CI real. Arranca el servidor y reintenta." >&2
+  exit 1
+}
+
 PUERTO="${PUERTO_CI:-3100}"
-# Secreto de PRUEBAS (64 hex aleatorios fijos: solo sirve para firmar
-# sesiones en entornos efímeros; nunca un secreto de producción).
-# Se EXPORTA: el servidor de producción valida AUTH_SECRET al arrancar.
-export AUTH_SECRET="${AUTH_SECRET:-a9f3c1d85e7b24608f4a2c9e6b1d73580e4c2f9a5b8d3e127c6a0f4b9e2d85c31}"
-export ADMIN_PASSWORD="${ADMIN_PASSWORD:-Pruebas*2026}"
+# Secretos ALEATORIOS de esta ejecución (nada publicado en el repo; el
+# servidor de producción valida AUTH_SECRET al arrancar, igual que el CI).
+AUTH_SECRET="$(openssl rand -hex 32)"
+ADMIN_PASSWORD="Ci-$(openssl rand -hex 12)"
+export AUTH_SECRET ADMIN_PASSWORD
 DIR_TMP="$(mktemp -d)"
 PID_SERVIDOR=""
-export DATABASE_URL="file:${DIR_TMP}/cig-ci.db?connection_limit=1"
 export NEXT_TELEMETRY_DISABLED=1
+export DATA_DIR="${DIR_TMP}/datos"
+mkdir -p "$DATA_DIR"
+
+# ── Base de datos PostgreSQL EFÍMERA (réplica local del servicio
+#    postgres:16 del CI real). Se crea en el PostgreSQL local del
+#    desarrollador y se ELIMINA al salir; el rol se reutiliza entre
+#    ejecuciones con contraseña nueva (patrón de setup.sh).
+PG_HOST="${PGHOST:-127.0.0.1}"
+PG_PUERTO="${PGPORT:-5432}"
+PG_BASE="cig_ci_$(date +%s)_$RANDOM"
+PG_USUARIO_CI="cig_ci"
+PG_CLAVE_CI="$(openssl rand -hex 12)"
+
+comando_admin() { # psql administrativo disponible (o vacío)
+  if command -v psql >/dev/null 2>&1; then
+    if sudo -n -u postgres -- psql -tAc "SELECT 1" >/dev/null 2>&1; then
+      echo "sudo -n -u postgres -- psql"; return
+    fi
+    if psql -h "$PG_HOST" -p "$PG_PUERTO" -tAc "SELECT 1" >/dev/null 2>&1 \
+       && psql -h "$PG_HOST" -p "$PG_PUERTO" -tAc "SELECT rolsuper FROM pg_roles WHERE rolname = current_user" 2>/dev/null | grep -q t; then
+      echo "psql -h $PG_HOST -p $PG_PUERTO"; return
+    fi
+  fi
+  echo ""
+}
+
+PSQL_ADMIN="$(comando_admin)"
+[ -n "$PSQL_ADMIN" ] || fallo_postgres
+pg_isready -h "$PG_HOST" -p "$PG_PUERTO" -q \
+  || fallo_postgres
+
+$PSQL_ADMIN -v ON_ERROR_STOP=1 <<SQL
+DO \$\$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${PG_USUARIO_CI}') THEN
+    CREATE ROLE ${PG_USUARIO_CI} LOGIN CREATEDB PASSWORD '${PG_CLAVE_CI}';
+  ELSE
+    ALTER ROLE ${PG_USUARIO_CI} LOGIN CREATEDB PASSWORD '${PG_CLAVE_CI}';
+  END IF;
+END
+\$\$;
+SQL
+$PSQL_ADMIN -tAc "SELECT 1 FROM pg_database WHERE datname = '${PG_BASE}'" | grep -q 1 \
+  || $PSQL_ADMIN -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${PG_BASE}\" OWNER \"${PG_USUARIO_CI}\""
+
+export DATABASE_URL="postgresql://${PG_USUARIO_CI}:${PG_CLAVE_CI}@${PG_HOST}:${PG_PUERTO}/${PG_BASE}?schema=public"
 
 limpiar() {
   [ -n "$PID_SERVIDOR" ] && kill "$PID_SERVIDOR" 2>/dev/null || true
   rm -rf "$DIR_TMP"
+  [ -n "$PSQL_ADMIN" ] && $PSQL_ADMIN -q -c "DROP DATABASE IF EXISTS \"${PG_BASE}\"" >/dev/null 2>&1 || true
 }
 trap limpiar EXIT
-
-paso() { echo ""; echo "──── $1 ────"; }
-fallo() { echo "  ✘ $1" >&2; exit 1; }
 
 paso "1/9 Guardia: ignoreBuildErrors desactivado"
 grep -nE 'ignoreBuildErrors[[:space:]]*:[[:space:]]*true' next.config.ts \
@@ -106,10 +161,10 @@ paso "6/9 Typecheck completo (tsc --noEmit)"
 ./node_modules/.bin/tsc --noEmit || fallo "tsc --noEmit reportó errores de tipos"
 echo "  ✔ sin errores de tipos"
 
-paso "7/9 BD efímera + semilla"
-bunx prisma db push --skip-generate > /dev/null \
-  || fallo "prisma db push falló sobre la BD efímera"
-echo "  ✔ esquema creado ($DATABASE_URL)"
+paso "7/9 BD efímera + migraciones + semilla"
+bunx prisma migrate deploy > /dev/null \
+  || fallo "prisma migrate deploy falló sobre la BD efímera"
+echo "  ✔ migraciones aplicadas (base efímera ${PG_BASE} en ${PG_HOST}:${PG_PUERTO})"
 ADMIN_PASSWORD="$ADMIN_PASSWORD" bun prisma/seed.ts
 
 paso "8/9 Servidor standalone (puerto $PUERTO)"

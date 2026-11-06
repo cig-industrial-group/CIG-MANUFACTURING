@@ -24,7 +24,7 @@ function nombreArchivo(archivo: File): string {
 }
 
 // POST /api/respaldo/subir — Registra un respaldo subido manualmente
-// (multipart/form-data, campo «archivo»: un .db descargado antes).
+// (multipart/form-data, campo «archivo»: un .dump descargado antes).
 // Se valida integridad y esquema ANTES de aceptarlo: si no pasa, se
 // rechaza con el error concreto y no queda rastro en el servidor.
 // El respaldo queda como SUBIDO y se restaura con /api/respaldo/restaurar
@@ -52,7 +52,7 @@ export async function POST(request: Request) {
     if (bytes.length === 0) {
       return NextResponse.json({ error: "ARCHIVO_VACIO" }, { status: 400 });
     }
-    if (!nombreArchivo(archivo).toLowerCase().endsWith(".db")) {
+    if (!nombreArchivo(archivo).toLowerCase().endsWith(".dump")) {
       return NextResponse.json({ error: "ARCHIVO_INVALIDO" }, { status: 400 });
     }
 

@@ -1,9 +1,8 @@
 # ============================================================
-# CIG-MANUFACTURING — Imagen de producción con Bun
+# CIG-MANUFACTURING — Imagen de producción con Bun + PostgreSQL
 #
 # Build:   docker build -t cig-manufacturing .
-# Run:     docker run -d -p 3000:3000 -v cig-manufacturing-data:/data \
-#            -e AUTH_SECRET=$(openssl rand -hex 32) cig-manufacturing
+# Run:     docker compose up -d (ver docker-compose.yml)
 #
 # El runtime de EJECUCIÓN es Bun (la imagen oven/bun no incluye
 # Node.js): la app standalone se sirve con `bun server.js`, el mismo
@@ -12,17 +11,40 @@
 #
 # Seguridad:
 #   · Proceso sin privilegios (usuario `bun` de la imagen base).
-#   · Sin secretos horneados: AUTH_SECRET se exige en el arranque
-#     (docker-entrypoint.sh) y se valida antes de tocar nada.
+#   · Sin secretos horneados: AUTH_SECRET y DATABASE_URL se exigen en
+#     el arranque (docker-entrypoint.sh) y se validan antes de tocar nada.
 #   · AUDITORÍA DE CADENA DE SUMINISTRO (Fase 5 — ADR-008): el build se
 #     DETIENE si `bun audit --audit-level=high` halla vulnerabilidades
 #     Alta o Crítica en el árbol de dependencias recién instalado.
 #   · devDependencies se eliminan tras la compilación.
 #   · HEALTHCHECK sobre GET /api.
+#
+# PostgreSQL:
+#   · postgresql-client-16 desde el repositorio oficial PGDG: el módulo
+#     Respaldo invoca pg_dump/pg_restore/psql (la restauración en
+#     caliente lo exige). La versión del cliente debe ser >= la del
+#     servidor (postgres:16): el cliente 15 del Debian base abortaría
+#     con «server version mismatch».
 # ============================================================
 FROM oven/bun:1.3.14-debian
 
 WORKDIR /app
+
+# 0) Cliente de PostgreSQL 16 (PGDG: bookworm solo empaqueta el 15).
+#    La clave se instala en el keyring firmado y el paquete temporal
+#    de descarga se purga para no engordar la imagen.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates gnupg \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+        -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+        > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-16 \
+    && apt-get purge -y gnupg \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
 
 # 1) Dependencias (capa cacheable; lockfile congelado)
 COPY package.json bun.lock ./
@@ -52,17 +74,20 @@ RUN bunx prisma generate && bun run build
 RUN bun install --frozen-lockfile --production
 
 # 5) Configuración de ejecución
-#    La BD vive en el volumen /data para persistir entre contenedores.
-#    connection_limit=1 (Fase 2): pool de UNA conexión SQLite; la app
-#    lo fuerza igualmente por código al arrancar (defensa en profundidad).
+#    Sin DATABASE_URL horneada: la inyecta docker-compose (nunca se
+#    gradúan credenciales dentro de la imagen). El entrypoint valida
+#    su presencia y formato ANTES de aplicar migraciones.
+#    DATA_DIR apunta al volumen /data (respaldos, branding,
+#    credenciales) para persistir entre contenedores.
 ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     PORT=3000 \
-    DATABASE_URL=file:/data/cig-manufacturing.db?connection_limit=1
+    DATA_DIR=/data \
+    BRANDING_DIR=/data/branding
 
 # Volumen de datos con propiedad del usuario sin privilegios: los
 # volúmenes nombrados NUEVOS heredan estos permisos en su primer uso.
-RUN mkdir -p /data .next/standalone/.next/cache \
+RUN mkdir -p /data/backups /data/branding .next/standalone/.next/cache \
     && chown -R bun:bun /data .next/standalone/.next/cache
 
 VOLUME /data

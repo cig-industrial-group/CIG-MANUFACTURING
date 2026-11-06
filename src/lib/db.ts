@@ -9,156 +9,112 @@
  */
 
 /**
- * CLIENTE PRISMA + ENDURECIMIENTO DE CONEXIÓN (remediación Fase 2)
- * ==================================================================
+ * CLIENTE PRISMA PARA POSTGRESQL
+ * ==============================
  *
- * Toda la especificidad de motor vive SOLO en este módulo, con compuerta
- * por esquema de URL (`file:` = SQLite). El resto de la aplicación
- * importa `db` y consulta modelos sin conocer el motor: al migrar a
- * PostgreSQL (producción) basta cambiar DATABASE_URL — este módulo se
- * vuelve no-op y ningún otro archivo se toca (agnóstico al motor).
+ * Migración de motor de archivo local → PostgreSQL (v1.1.1). La
+ * aplicación sigue siendo agnóstica al motor: todo el mundo importa `db`
+ * y consulta modelos. Este módulo ya NO contiene la lógica de
+ * endurecimiento propia del motor anterior (modo de bitácora WAL,
+ * tiempo de espera de bloqueo, pool forzado a 1): esos controles
+ * dejaron de aplicar y se eliminaron por completo (cero código muerto).
  *
- * Controles aplicados (verificados empíricamente contra Prisma 6.11.1,
- * ver scripts/prueba-humo-fase2.ts):
+ * Con PostgreSQL la concurrencia y la resiliencia se resuelven así:
  *
- *  1. `connection_limit=1` — el pool mantiene EXACTAMENTE una conexión.
- *     Las peticiones concurrentes forman cola en el pool (medido: una
- *     consulta durante una transacción de 4 s espera y sale bien; jamás
- *     se abre una 2.ª conexión). Elimina SQLITE_BUSY *dentro* de la app.
- *     Se fuerza aquí por código (defensa en profundidad: aunque alguien
- *     olvide el parámetro en el .env, la app lo aplica) y además se
- *     declara en .env / Dockerfile / docker-compose por visibilidad de
- *     despliegue. Si el operador fija OTRO connection_limit explícito,
- *     se respeta su criterio.
+ *  · POOL DE CONEXIONES: administrado NATIVAMENTE por Prisma y el
+ *    servidor PostgreSQL. El pool por defecto de Prisma (num_cpus*2+1
+ *    conexiones) se respeta: PostgreSQL es un servidor multi-conexión
+ *    con MVCC; ya no existe el motivo del pool=1 (evitar errores de
+ *    base ocupada dentro de la app). Si el operador desea acotarlo, declara
+ *    `connection_limit` en la propia DATABASE_URL (visible para
+ *    Prisma, el CLI y las herramientas pg_*).
  *
- *  2. `PRAGMA journal_mode=WAL` — Write-Ahead Logging. Persiste EN EL
- *     ARCHIVO (una vez activo sobrevive a reinicios, scripts y al CLI
- *     de Prisma). Los lectores externos (CLI de operaciones, monitoreo,
- *     respaldo en frío de un contenedor detenido) dejan de bloquear al
- *     escritor. El respaldo en caliente de la app (`VACUUM INTO`,
- *     módulo Respaldo) produce una copia consistente completa bajo WAL
- *     (verificado). La restauración es copia de datos por SQL en una
- *     transacción: nunca reemplaza el archivo, así que el modo no se
- *     pierde; y si alguien restaura un archivo ajeno por fuera, el
- *     bootstrap del arranque re-aplica WAL (auto-sanación).
+ *  · CONTENCIÓN DE ESCRITURA: la serialización de escritores que el
+ *    motor anterior imponía físicamente ahora la garantiza el servidor con
+ *    bloqueos de fila y el nivel de aislamiento Serializable de las
+ *    transacciones de negocio (ver src/lib/reintentos.ts, que además
+ *    reintenta las anomalías 40001/40P01 que SSI puede reportar).
  *
- *  3. `PRAGMA busy_timeout=5000` — por CONEXIÓN. Con pool=1 no hay
- *     contienda interna; protege la única conexión contra cerrojos de
- *     escritura de procesos EXTERNOS (mantenimiento con sqlite3 CLI,
- *     despliegue): el motor espera hasta 5 s internamente en lugar de
- *     devolver SQLITE_BUSY de inmediato. Complementa (no sustituye) al
- *     envoltorio de reintentos de la Fase 3 (src/lib/reintentos.ts):
- *     los cerrojos que EXCEDEN estos 5 s se absorben re-ejecutando la
- *     operación completa con retroceso exponencial acotado.
- *
- * Defensa en profundidad de la capa de datos (Fases 2+3):
- *   pool=1 (cola interna) → WAL (lectores externos no bloquean) →
- *   busy_timeout=5 s (espera interna del motor) → reintentos con
- *   retroceso (src/lib/reintentos.ts, para bloqueos más largos).
- *
- * Decisiones explícitas (lo que NO se toca y por qué):
- *  · `PRAGMA synchronous` — permanece FULL (valor por defecto). En WAL,
- *    FULL hace fsync del WAL en cada commit: no se relaja durabilidad
- *    a cambio de rendimiento en un sistema de inventario.
- *  · `PRAGMA wal_autocheckpoint` — por defecto (1000 páginas ≈ 4 MB):
- *    el archivo -wal permanece acotado y se integra solo. Al cerrar la
- *    última conexión, SQLite hace checkpoint y elimina -wal (verificado:
- *    la copia en frío de un contenedor detenido sigue siendo segura).
- *  · Fallo al EJECUTAR los pragmas (BD inaccesible) → el arranque falla
- *    (fail-fast en instrumentation.ts): mejor contenedor reiniciando
- *    que un sistema "vivo" que rompe cada petición.
- *  · WAL no aplicable (p. ej. sistema de archivos de red sin memoria
- *    compartida) → se ADIERTE y se continúa en journal de reversa:
- *    es degradación de concurrencia, no de integridad.
+ *  · VERIFICACIÓN AL ARRANQUE: verificarConexionBD() ejecuta un
+ *    SELECT 1 ligerísimo; la llama src/instrumentation.ts ANTES de
+ *    atender peticiones. Si la base no está disponible, el arranque
+ *    falla (fail-fast): mejor un contenedor reiniciando que un
+ *    sistema "vivo" que rompe cada petición.
  *
  * Referencias: NIST SP 800-53 SC-5 (protección contra denegación:
- * colas ordenadas en lugar de errores), SI-10 (prediccibilidad de la
- * capa de datos); ISO 27001 A.8.6/A.8.25 (gestión de capacidad y
- * aprobación de cambios en el entorno); OWASP ASVS 5.4.1 (integridad).
+ * pool dimensionado por el servidor en lugar de cola artificial),
+ * SI-10 (prediccibilidad de la capa de datos); ISO 27001 A.8.6
+ * (gestión de capacidad) y A.12.1.2 (control de cambios: eliminación
+ * auditada de los controles del motor de archivo anterior); OWASP ASVS 5.4.1 (integridad).
  */
 import { PrismaClient } from "@prisma/client";
+import path from "node:path";
 
-/** Espera interna de SQLite (ms) ante un cerrojo de escritura externo. */
-export const BUSY_TIMEOUT_MS = 5000;
+/** Esquemas de URL aceptados para PostgreSQL. */
+const ESQUEMAS_PG = new Set(["postgresql:", "postgres:"]);
 
-/** Estado de la conexión tras el arranque (sin rutas ni secretos). */
-export type InfoConexionBD = {
-  motor: "sqlite" | "otro";
-  modoJournal: string | null;
-  busyTimeoutMs: number | null;
-};
-
-/** ¿La URL de conexión apunta a un archivo SQLite (esquema file:)? */
-function esSQLite(url: string | undefined): url is string {
-  return typeof url === "string" && url.startsWith("file:");
+/**
+ * ¿La URL de conexión apunta a un servidor PostgreSQL? Se valida al
+ * cargar el módulo: detectar aquí un .env con sintaxis de otro motor
+ * (p. ej. `file:` heredada de la era del motor de archivo) evita errores
+ * crípticos del driver más adelante.
+ */
+export function esURLPostgreSQL(url: string | undefined): url is string {
+  if (typeof url !== "string" || url.length === 0) return false;
+  try {
+    return ESQUEMAS_PG.has(new URL(url).protocol);
+  } catch {
+    return false;
+  }
 }
 
 /**
- * Normaliza una URL de conexión: en SQLite fuerza el parámetro
- * `connection_limit=1` (pool de una conexión) si no viene declarado.
- * Cualquier otro motor (p. ej. postgresql://) se devuelve INTACTO:
- * aquí vive la única ramificación por motor de toda la app.
+ * Raíz de los archivos locales de la máquina (respaldos, branding,
+ * credenciales) — variable de entorno DATA_DIR (metodología 12-Factor:
+ * la configuración vive en el entorno; defecto ./db para desarrollo).
+ * NUNCA se infiere de DATABASE_URL: la URL de PostgreSQL no describe
+ * un archivo local. Fuente canónica: la usan el módulo de respaldo y
+ * el de branding para resolver sus rutas de forma idéntica.
  */
-export function urlSQLiteSegura(url: string | undefined): string | undefined {
-  if (!esSQLite(url) || url.includes("connection_limit=")) return url;
-  return `${url}${url.includes("?") ? "&" : "?"}connection_limit=1`;
+export function directorioDatos(): string {
+  const configurado = process.env.DATA_DIR?.trim();
+  if (!configurado) return path.resolve(process.cwd(), "db");
+  return path.isAbsolute(configurado) ? configurado : path.resolve(process.cwd(), configurado);
 }
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
-  preparacionBD: Promise<InfoConexionBD> | undefined;
+  verificacionBD: Promise<void> | undefined;
 };
 
-const urlConfigurada = process.env.DATABASE_URL;
-
-export const db =
-  globalForPrisma.prisma ??
-  new PrismaClient(
-    // Sin DATABASE_URL se delega en PrismaClient (error claro de arranque).
-    urlConfigurada
-      ? { datasources: { db: { url: urlSQLiteSegura(urlConfigurada) as string } } }
-      : undefined,
+// Fail-fast temprano: DATABASE_URL debe ser una URL de PostgreSQL.
+// Sin DATABASE_URL se delega en PrismaClient (error claro de arranque).
+if (
+  typeof process.env.DATABASE_URL === "string" &&
+  process.env.DATABASE_URL.length > 0 &&
+  !esURLPostgreSQL(process.env.DATABASE_URL)
+) {
+  throw new Error(
+    "[bd] DATABASE_URL no es una URL de PostgreSQL (esperado postgresql://usuario:clave@host:puerto/base). " +
+      "Si conservas una URL file: del motor de archivo anterior, actualiza tu .env a partir de .env.example.",
   );
+}
+
+export const db = globalForPrisma.prisma ?? new PrismaClient();
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = db;
 
 /**
- * Endurecimiento de conexión al ARRANQUE. Idempotente (una vez por
+ * Verificación de conectividad al ARRANQUE. Idempotente (una vez por
  * proceso; la promesa se cachea a nivel global, sobrevive al HMR de
- * dev). No-op para motores distintos de SQLite. La ejecuta
- * src/instrumentation.ts ANTES de que el servidor atienda peticiones.
+ * dev). Ejecuta un SELECT 1 parametrizado (tag template: sin entrada
+ * de usuario, sin concatenación). La ejecuta src/instrumentation.ts
+ * ANTES de que el servidor atienda peticiones; si la base no está
+ * disponible, el error burbujea y el arranque se detiene.
  */
-export function prepararConexionBD(): Promise<InfoConexionBD> {
-  if (!esSQLite(process.env.DATABASE_URL)) {
-    return Promise.resolve({ motor: "otro", modoJournal: null, busyTimeoutMs: null });
+export function verificarConexionBD(): Promise<void> {
+  if (!globalForPrisma.verificacionBD) {
+    globalForPrisma.verificacionBD = db.$queryRaw`SELECT 1`.then(() => undefined);
   }
-  if (!globalForPrisma.preparacionBD) {
-    globalForPrisma.preparacionBD = (async (): Promise<InfoConexionBD> => {
-      // 1) WAL: cambia el modo del ARCHIVO (persistente). No puede
-      //    ejecutarse dentro de una transacción; por query crudo va fuera.
-      const modo = await db.$queryRawUnsafe<Array<{ journal_mode: string }>>(
-        "PRAGMA journal_mode=WAL;",
-      );
-      const modoJournal = modo[0]?.journal_mode ?? "desconocido";
-      if (modoJournal !== "wal") {
-        console.warn(
-          `[bd] journal_mode=WAL no pudo aplicarse (modo actual: ${modoJournal}). ` +
-            "La base operará con journal de reversa: los lectores externos bloquean al escritor. " +
-            "Revise el sistema de archivos del volumen de datos.",
-        );
-      }
-
-      // 2) busy_timeout: por conexión. El pool tiene UNA conexión y es
-      //    la que la app usará siempre. SQLite devuelve enteros como
-      //    BigInt en queries crudos: se normaliza a Number.
-      const timeout = await db.$queryRawUnsafe<Array<{ timeout: bigint }>>(
-        `PRAGMA busy_timeout=${BUSY_TIMEOUT_MS};`,
-      );
-      const busyTimeoutMs =
-        timeout[0] !== undefined ? Number(timeout[0].timeout) : null;
-
-      return { motor: "sqlite", modoJournal, busyTimeoutMs };
-    })();
-  }
-  return globalForPrisma.preparacionBD;
+  return globalForPrisma.verificacionBD;
 }

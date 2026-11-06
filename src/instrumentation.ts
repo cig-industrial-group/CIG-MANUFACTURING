@@ -22,16 +22,15 @@
  * · DESARROLLO: solo se avisa (el módulo de seguridad genera un secreto
  *   efímero aleatorio, nunca un valor conocido).
  *
- * · BASE DE DATOS (remediación Fase 2): tras validar el secreto se
- *   endurece la conexión SQLite (WAL + busy_timeout + pool de 1)
- *   mediante prepararConexionBD(). Si la base no está disponible, el
- *   arranque FALLA aquí (fail-fast): mejor un contenedor reiniciando
- *   que un sistema "vivo" que rompe cada petición con 500. Para
- *   motores no SQLite es un no-op (código agnóstico al motor).
+ * · BASE DE DATOS (PostgreSQL): tras validar el secreto se verifica la
+ *   conectividad con un SELECT 1 (verificarConexionBD, en src/lib/db.ts).
+ *   Si la base no está disponible, el arranque FALLA aquí (fail-fast):
+ *   mejor un contenedor reiniciando que un sistema "vivo" que rompe
+ *   cada petición con 500.
  *
  * Ver también: src/modulos/autenticacion/servicios/seguridad.ts
  * (validación perezosa como defensa en profundidad) y src/lib/db.ts
- * (toda la especificidad de motor vive allí).
+ * (cliente Prisma y verificación de conexión).
  */
 export async function register(): Promise<void> {
   const { validarAuthSecret, esProduccion, mensajeErrorAuthSecret } = await import(
@@ -58,14 +57,20 @@ export async function register(): Promise<void> {
     );
   }
 
-  // FASE 2 — Endurecimiento de conexión a la base de datos ANTES de
-  // atender la primera petición (idempotente; no-op si no es SQLite).
-  const { prepararConexionBD } = await import("@/lib/db");
-  const info = await prepararConexionBD();
-  if (info.motor === "sqlite") {
-    console.log(
-      `[bd] SQLite endurecida: journal_mode=${info.modoJournal}, ` +
-        `busy_timeout=${info.busyTimeoutMs}ms, pool=1 conexión`,
+  // Conectividad a PostgreSQL ANTES de atender la primera petición
+  // (idempotente; SELECT 1 parametrizado, sin secretos en el mensaje).
+  const { verificarConexionBD } = await import("@/lib/db");
+  try {
+    await verificarConexionBD();
+    console.log("[bd] PostgreSQL operativo (pool administrado nativamente por Prisma)");
+  } catch (e) {
+    const mensaje = e instanceof Error ? e.message : String(e);
+    console.error(
+      `[bd] PostgreSQL no está disponible al arranque: ${mensaje
+        .replace(/\b(?:postgresql|postgres):\/\/[^\s'"]+/gi, "[URL-REDACTADA]")
+        .replace(/\s+/g, " ")
+        .slice(0, 200)}`,
     );
+    throw new Error("Base de datos inalcanzable al arranque (fail-fast).");
   }
 }

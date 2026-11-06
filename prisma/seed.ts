@@ -24,7 +24,7 @@
  *        retrospectivo (setup.sh / docker-entrypoint.sh).
  *      - Sin contraseña de entorno → contraseña ALEATORIA (144 bits)
  *        que se escribe UNA VEZ en credenciales-iniciales.txt
- *        (permisos 0600, junto a la base de datos) y obliga a
+ *        (permisos 0600, bajo DATA_DIR) y obliga a
  *        cambiarla en el primer acceso (debeCambiarPassword=true).
  *    La contraseña NUNCA se imprime por consola.
  *
@@ -50,11 +50,15 @@ function passwordAleatoria(): string {
   return randomBytes(18).toString("base64url");
 }
 
-/** Ruta del archivo de la BD a partir de DATABASE_URL (file:...). */
-function rutaBaseDatos(): string {
-  const url = process.env.DATABASE_URL ?? "";
-  const limpia = url.replace(/^file:/, "");
-  return path.isAbsolute(limpia) ? limpia : path.resolve(process.cwd(), limpia);
+/**
+ * Raíz de los archivos locales de la máquina (misma resolución canónica
+ * que src/lib/db.ts: variable DATA_DIR, defecto ./db; nunca inferida de
+ * DATABASE_URL porque la URL de PostgreSQL no describe un archivo local).
+ */
+function directorioDatos(): string {
+  const configurado = process.env.DATA_DIR?.trim();
+  if (!configurado) return path.resolve(process.cwd(), "db");
+  return path.isAbsolute(configurado) ? configurado : path.resolve(process.cwd(), configurado);
 }
 
 /** Catálogo de permisos del sistema */
@@ -231,8 +235,9 @@ async function main() {
     if (origen === "entorno") {
       console.log(`✔ Usuario administrador creado: ${CORREO_ADMIN} (contraseña: INITIAL_ADMIN_PASSWORD del entorno)`);
     } else {
-      // Contraseña aleatoria: escribir UNA VEZ junto a la BD (permisos 600).
-      const archivo = path.join(path.dirname(rutaBaseDatos()), "credenciales-iniciales.txt");
+      // Contraseña aleatoria: escribir UNA VEZ en DATA_DIR (permisos 600).
+      fs.mkdirSync(directorioDatos(), { recursive: true });
+      const archivo = path.join(directorioDatos(), "credenciales-iniciales.txt");
       const contenido =
         `CIG-MANUFACTURING — Credenciales iniciales (primera instalación)\n` +
         `Fecha: ${new Date().toISOString()}\n` +

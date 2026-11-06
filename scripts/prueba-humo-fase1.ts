@@ -9,7 +9,7 @@
  *   2. Las entradas con artefactos float heredados se RECHAZAN (fail-closed).
  *   3. El conteo en paquetes (paquetes × factor + sueltas) es exacto.
  *   4. Los snapshots del ledger (cantidadDespues) son exactos.
- *   5. La clase de almacenamiento en SQLite es TEXT (nunca REAL).
+ *   5. La clase de almacenamiento de los decimales es TEXT (nunca REAL/float).
  *   6. Las salidas que exceden el stock se rechazan exactamente.
  *
  * Ejecutar: bun scripts/prueba-humo-fase1.ts
@@ -18,23 +18,30 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Prisma, PrismaClient } from "@prisma/client";
-import { registrarMovimientoTx, ErrorNegocio } from "../src/modulos/almacen/servicios/nucleo";
 
 // ============================================================
-// CARGA EXPLÍCITA DEL .env DEL PROYECTO (patrón adoptado en la Fase 2):
-// el entorno del shell puede traer un DATABASE_URL heredado ajeno a la
-// app (export de otra sesión) que bun NO sobreescribe con el .env; aquí
-// se fija la configuración real ANTES de crear el cliente.
+// CARGA EXPLÍCITA DEL .env DEL PROYECTO (patrón de las fases 2–6):
+// la resolución automática de bun puede preferir el .env de un
+// directorio SUPERIOR (o un export ajeno del shell); aquí se fija la
+// configuración real ANTES de importar los módulos bajo prueba — de ahí
+// que la importación del núcleo de negocio sea DINÁMICA (los imports
+// estáticos se evalúan antes que este código y arrastrarían una URL
+// equivocada al construir el PrismaClient de @/lib/db).
 // ============================================================
 function cargarEnvProyecto(): void {
   const directorioScript = path.dirname(fileURLToPath(import.meta.url));
   const rutaEnv = path.resolve(directorioScript, "..", ".env");
   for (const linea of fs.readFileSync(rutaEnv, "utf8").split("\n")) {
     const m = linea.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*?)\s*$/);
-    if (m && m[2] !== "") process.env[m[1]] = m[2];
+    if (m && m[2] !== "") process.env[m[1]] = m[2].replace(/^"(.*)"$/, "$1");
   }
 }
 cargarEnvProyecto();
+
+// Importación DINÁMICA (tras fijar el entorno).
+const { registrarMovimientoTx, ErrorNegocio } = await import(
+  "../src/modulos/almacen/servicios/nucleo"
+);
 
 const db = new PrismaClient();
 
@@ -186,13 +193,20 @@ async function main() {
   }
   afirmar(sinStock, "SALIDA de 8.06 con stock 8.05 → STOCK_INSUFICIENTE (comparación exacta)");
 
-  console.log("\n== 7) Clase de almacenamiento SQLite ==");
-  const tipos = (await db.$queryRawUnsafe(
-    'SELECT typeof("cantidad") AS clase FROM Stock WHERE "productoId" = \'smoke-f1-p1\' UNION ALL SELECT typeof("cantidad") FROM Movimiento LIMIT 5',
-  )) as Array<{ clase: string }>;
+  console.log("\n== 7) Clase de almacenamiento en la base ==");
+  // PostgreSQL: las columnas decimales persisten como text (ADR «Decimales
+  // como String/TEXT»), jamás como float/numeric de doble precisión.
+  const tipos = (await db.$queryRaw<Array<{ data_type: string }>>(
+    Prisma.sql`
+      SELECT data_type FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name IN ('Stock', 'Movimiento')
+        AND column_name IN ('cantidad', 'cantidadDespues', 'stockMinimo')
+      GROUP BY data_type`,
+  )) as Array<{ data_type: string }>;
   afirmar(
-    tipos.every((t) => t.clase === "text"),
-    `todas las filas persisten como TEXT (${[...new Set(tipos.map((t) => t.clase))].join(", ")})`,
+    tipos.length === 1 && tipos[0].data_type === "text",
+    `todas las columnas decimales son text (${tipos.map((t) => t.data_type).join(", ") || "sin filas"})`,
   );
 
   console.log("\n== 8) Limpieza ==");

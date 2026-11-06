@@ -13,8 +13,8 @@
  *
  * Limitador en memoria por clave arbitraria (IP, cuenta de correo o
  * combinación de ambas). Pensado para el modelo de despliegue del sistema
- * (instancia única: un contenedor + SQLite), donde no se necesita estado
- * compartido entre procesos.
+ * (instancia única: un contenedor + base de datos local), donde no se
+ * necesita estado compartido entre procesos.
  *
  * Comportamiento:
  *  · Ventana deslizante simple: N fallos dentro de la ventana → la clave

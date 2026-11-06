@@ -31,9 +31,11 @@ export async function GET(request: Request) {
   // «conStock» (cantidad > 0) se filtra en la capa de aplicación con
   // comparación Decimal exacta (el SQL no compara texto decimal)
   if (q) {
+    // mode: "insensitive" — conserva la búsqueda insensible a mayúsculas
+    // del motor anterior (PostgreSQL LIKE es sensible por defecto).
     where.OR = [
-      { producto: { sku: { contains: q } } },
-      { producto: { nombre: { contains: q } } },
+      { producto: { sku: { contains: q, mode: "insensitive" } } },
+      { producto: { nombre: { contains: q, mode: "insensitive" } } },
     ];
   }
 

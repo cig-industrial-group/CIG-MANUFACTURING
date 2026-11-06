@@ -9,27 +9,36 @@
  */
 
 /**
- * LÓGICA DE SERVIDOR DEL MÓDULO RESPALDO
+ * LÓGICA DE SERVIDOR DEL MÓDULO RESPALDO (PostgreSQL)
+ * =====================================================
  *
- * Respaldo completo y restauración EN CALIENTE de la base de datos:
+ * Migración de motor de archivo local → PostgreSQL (v1.1.1). El respaldo
+ * pasó de la instantánea compactada del archivo de la base anterior a
+ * «pg_dump --format=custom» (volcado comprimido del servidor), y la
+ * restauración de «leer el archivo con un segundo PrismaClient» a
+ * «restaurar el volcado en una BASE TRANSITORIA de verificación y copiar
+ * desde ella». Las garantías de negocio se conservan ÍNTEGRAS:
  *
- * · Crear respaldo: instantánea consistente con VACUUM INTO (SQLite).
- *   Funciona con el servidor en operación, sin bloquear a los lectores.
+ * · Crear respaldo: pg_dump produce una instantánea consistente del
+ *   esquema public (MVCC: el volcado ve una fotografía coherente aunque
+ *   haya actividad en curso) en formato custom comprimido (.dump).
  *
- * · Subir respaldo externo: un archivo .db descargado antes (de esta
- *   u otra instalación con el mismo esquema) se valida —integridad y
- *   esquema— y queda registrado como SUBIDO; desde ahí se restaura
- *   igual que cualquier otro respaldo, con todas las garantías.
+ * · Subir respaldo externo: un archivo .dump descargado antes (de esta
+ *   u otra instalación con el mismo esquema) se valida —cabecera PGDMP,
+ *   integridad del archivo (pg_restore --list) y esquema— y queda
+ *   registrado como SUBIDO; desde ahí se restaura igual que cualquier
+ *   otro respaldo, con todas las garantías.
  *
- * · Restaurar (en caliente): una ÚNICA transacción borra y reinserta
- *   todas las tablas en orden topológico (hijos primero al borrar,
- *   padres primero al insertar, respetando las FK físicas). Si
- *   cualquier paso falla, la transacción se revierte completa: la base
- *   queda EXACTAMENTE como estaba (rollback automático). Antes de
- *   tocar un solo dato se crea un snapshot pre-restauración y se
- *   valida el respaldo (integridad + esquema compatible): se lee TODO
- *   el contenido ANTES de escribir, así un archivo corrupto o
- *   incompatible jamás alcanza a modificar la base.
+ * · Restaurar (en caliente): el volcado se restaura PRIMERO a una base
+ *   transitoria (creada con CREATE DATABASE, eliminada al terminar) y
+ *   se valida ahí TODO —esquema y conteos—; solo entonces una ÚNICA
+ *   transacción borra y reinserta todas las tablas de la base viva en
+ *   orden topológico (hijos primero al borrar, padres primero al
+ *   insertar, respetando las FK físicas). Si cualquier paso falla, la
+ *   transacción se revierte completa: la base queda EXACTAMENTE como
+ *   estaba (rollback automático). Un archivo corrupto o incompatible
+ *   jamás alcanza a modificar la base viva porque se validó ANTES, en
+ *   la base transitoria.
  *
  * · Ventana de reversión de 24 h: cada restauración exitosa registra
  *   su snapshot pre-restauración. «Revertir» restaura ese snapshot
@@ -39,16 +48,45 @@
  *
  * · Los registros de respaldo/restauración (RespaldoBD/RestauracionBD)
  *   describen archivos de ESTA máquina: se excluyen de la copia para
- *   que el inventario coincida siempre con el contenido de db/backups/.
+ *   que el inventario coincida siempre con el contenido del directorio
+ *   de respaldos.
+ *
+ * MEMORIA: la copia de restauración es POR LOTES (lectura paginada de
+ * la base transitoria + createMany por lote), y la descarga se sirve
+ * en STREAMING: ninguna operación carga el volcado completo en RAM.
+ *
+ * SEGURIDAD de los procesos hijos (refinamientos del dictamen):
+ *   1. PGPASSWORD se inyecta EXCLUSIVAMENTE en el objeto `env` de las
+ *      opciones de execFile — jamás en el comando ni en los argumentos
+ *      (invisible para `ps aux`).
+ *   2. Toda herramienta pg_* se invoca con `--no-password`: si falta la
+ *      contraseña, falla de inmediato en lugar de colgarse esperando
+ *      una entrada interactiva que nunca llegará. Además cada invocación
+ *      lleva `timeout`: un proceso atascado se termina con señal.
+ *   3. Ningún log incluye la cadena de conexión: los mensajes de error
+ *      pasan por sanearParaLog (URLs redactadas) antes de registrarse.
+ *
+ * QUERIES CRUDAS: este módulo usa $queryRaw (plantilla etiquetada,
+ * parámetros enlazados) para consultas de catálogo (information_schema,
+ * pg_database_size) y consultas fijas sin entrada de usuario. Los
+ * identificadores de la base transitoria NO provienen del usuario:
+ * se generan internamente y se validan contra ^[a-z0-9_]+$ antes de
+ * interpolarse en el ÚNICO DDL (CREATE/DROP DATABASE), que además
+ * double-quotea el identificador.
  */
-import fs from "node:fs";
+import fs, { createReadStream } from "node:fs";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { Readable } from "node:stream";
 import { Prisma, PrismaClient } from "@prisma/client";
-import { db } from "@/lib/db";
-import { transaccion } from "@/lib/reintentos";
+import { db, directorioDatos } from "@/lib/db";
+import { transaccion, sanearParaLog } from "@/lib/reintentos";
 import { ErrorNegocio } from "@/modulos/almacen/servicios/nucleo";
 
 type PrismaTx = Parameters<Parameters<typeof db.$transaction>[0]>[0];
+
+const execFileAsync = promisify(execFile);
 
 /** Horas de la ventana para revertir una restauración exitosa */
 export const VENTANA_REVERSA_HORAS = 24;
@@ -58,30 +96,34 @@ const MAX_RESPALDOS_AUTOMATICOS = 7;
 const HORAS_VIDA_SNAPSHOT = 48;
 /** Una restauración EN_PROGRESO más antigua que esto se considera interrumpida */
 const MIN_EN_PROGRESO = 15;
-/** Filas por lote de createMany (límite de variables de SQLite) */
+/**
+ * Filas por lote de la copia de restauración (lectura paginada +
+ * createMany): acota la memoria de la operación y el número de
+ * parámetros por sentencia preparada del protocolo de PostgreSQL.
+ */
 const FILAS_POR_LOTE = 200;
 /** Tamaño máximo aceptado para un archivo de respaldo subido (1 GB) */
 export const TAMANO_MAX_SUBIDA_BYTES = 1024 * 1024 * 1024;
-/** Cabecera de todo archivo SQLite válido (primeros 16 bytes) */
-const MAGICO_SQLITE = "SQLite format 3\0";
+/** Cabecera de todo volcado pg_dump en formato custom (primeros 5 bytes) */
+const MAGICO_PG_DUMP = "PGDMP";
+/** Extensión canónica de los volcados pg_dump custom de este sistema */
+const EXTENSION_RESPALDO = ".dump";
+/** Tiempo límite (ms) por invocación de herramienta pg_* (evita hilos colgados) */
+const TIMEOUT_PG_MS = 600_000;
+/** Esquema donde vive el modelo de datos (coincide con ?schema=public) */
+const ESQUEMA_DATOS = "public";
 
 /** Modelos excluidos de la copia al restaurar: registros de esta máquina */
 const MODELOS_EXCLUIDOS = new Set(["RespaldoBD", "RestauracionBD"]);
 
 // ============================================================
-// RUTAS DE ARCHIVOS
+// RUTAS DE ARCHIVOS (DATA_DIR — resolución canónica en src/lib/db.ts)
 // ============================================================
 
-/** Ruta absoluta del archivo de la base de datos viva */
-export function rutaBaseDatos(): string {
-  const url = process.env.DATABASE_URL ?? "file:./db/custom.db";
-  const limpia = url.replace(/^file:/, "").split("?")[0];
-  return path.isAbsolute(limpia) ? limpia : path.resolve(process.cwd(), limpia);
-}
 
-/** Carpeta de respaldos (junto a la base); la crea si no existe */
+/** Carpeta de respaldos (DATA_DIR/backups); la crea si no existe */
 export function carpetaRespaldos(): string {
-  const carpeta = path.join(path.dirname(rutaBaseDatos()), "backups");
+  const carpeta = path.join(directorioDatos(), "backups");
   fs.mkdirSync(carpeta, { recursive: true });
   return carpeta;
 }
@@ -98,9 +140,143 @@ function marcaTiempo(): string {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
-/** Escapa comillas simples para SQL literal (VACUUM INTO '...') */
-function escSql(valor: string): string {
-  return valor.replace(/'/g, "''");
+/** Sufijo aleatorio corto (hex) para nombres de base transitoria */
+function sufijoAleatorio(): string {
+  return Math.random().toString(36).slice(2, 8);
+}
+
+// ============================================================
+// CONEXIÓN POSTGRESQL (análisis de DATABASE_URL para las
+// herramientas pg_*, sin exponer la contraseña en argv)
+// ============================================================
+
+/** Componentes de conexión extraídos de DATABASE_URL. */
+type ConexionPG = {
+  host: string;
+  puerto: string;
+  usuario: string;
+  /** Solo para el objeto env de execFile (PGPASSWORD); jamás en argumentos. */
+  password: string;
+  base: string;
+};
+
+/** Decodifica un componente percent-encoded de la URL de forma segura. */
+function decodificar(valor: string): string {
+  try {
+    return decodeURIComponent(valor);
+  } catch {
+    return valor;
+  }
+}
+
+/**
+ * Analiza DATABASE_URL y extrae los parámetros de conexión para las
+ * herramientas pg_* (pg_dump/pg_restore/psql). Lanza ErrorNegocio si la
+ * URL no es de PostgreSQL — fail-fast antes de spawnear procesos.
+ */
+export function analizarURLPostgres(): ConexionPG {
+  const url = process.env.DATABASE_URL ?? "";
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    throw new ErrorNegocio("URL_BD_INVALIDA", 500);
+  }
+  if (u.protocol !== "postgresql:" && u.protocol !== "postgres:") {
+    throw new ErrorNegocio("URL_BD_INVALIDA", 500);
+  }
+  const base = decodificar(u.pathname.replace(/^\/+/, ""));
+  if (!u.hostname || !base) throw new ErrorNegocio("URL_BD_INVALIDA", 500);
+  return {
+    host: u.hostname,
+    puerto: u.port || "5432",
+    usuario: decodificar(u.username) || "postgres",
+    password: decodificar(u.password),
+    base,
+  };
+}
+
+/** Argumentos de conexión comunes (host/puerto/usuario — SIN contraseña). */
+function argumentosConexion(conn: ConexionPG): string[] {
+  return ["-h", conn.host, "-p", conn.puerto, "-U", conn.usuario];
+}
+
+// ============================================================
+// EJECUCIÓN SEGURA DE HERRAMIENTAS pg_* (refinamientos 1-3)
+// ============================================================
+
+/**
+ * Ejecuta una herramienta de PostgreSQL con execFile (sin shell: sin
+ * inyección de comandos; los argumentos viajan como array).
+ *
+ * · PGPASSWORD se inyecta SOLO en el objeto env (nunca en argv).
+ * · `--no-password` SIEMPRE primera bandera: si PGPASSWORD falta o es
+ *   incorrecta, la herramienta falla al instante en vez de esperar
+ *   entrada interactiva (bloqueo de hilo evitado).
+ * · `timeout` termina el proceso si se atasca; `maxBuffer` acota la
+ *   salida capturada.
+ */
+async function ejecutarPG(herramienta: string, args: string[]): Promise<string> {
+  const { password } = analizarURLPostgres();
+  const { stdout } = await execFileAsync(herramienta, ["--no-password", ...args], {
+    // Refinamiento #1: la contraseña vive EXCLUSIVAMENTE aquí.
+    env: { ...process.env, PGPASSWORD: password },
+    timeout: TIMEOUT_PG_MS,
+    maxBuffer: 8 * 1024 * 1024,
+  });
+  return stdout;
+}
+
+/** Forma de los errores de execFile con stderr adjunto. */
+type ErrorExec = Error & { code?: string | number; stderr?: string; killed?: boolean };
+
+/**
+ * Descripción saneada (refinamiento #3) de un fallo de herramienta pg:
+ * primera línea del stderr, redactando cualquier URL de conexión, sin
+ * incluir jamás la contraseña ni la cadena completa DATABASE_URL.
+ */
+function describirFalloPG(error: unknown, herramienta: string): string {
+  if (error instanceof Error) {
+    const e = error as ErrorExec;
+    if (e.code === "ENOENT") {
+      return `la herramienta «${herramienta}» no está instalada en el contenedor (requiere postgresql-client ≥ 16)`;
+    }
+    if (e.killed) {
+      return `«${herramienta}» excedió el tiempo límite de ${TIMEOUT_PG_MS / 1000} s`;
+    }
+    const stderr = typeof e.stderr === "string" ? e.stderr : "";
+    const primera = stderr
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean)[0];
+    return sanearParaLog(primera || e.message).slice(0, 300);
+  }
+  return "error desconocido";
+}
+
+/**
+ * Ejecuta una herramienta pg y traduce su fallo a ErrorNegocio con el
+ * código correcto (herramienta ausente → HERRAMIENTA_PG_NO_DISPONIBLE;
+ * falta de CREATEDB → RESPALDO_PERMISO_CREATEDB; resto → causa). El
+ * detalle técnico saneado queda en el log del servidor.
+ */
+async function ejecutarPGO(herramienta: string, args: string[], codigoFallo: string): Promise<string> {
+  try {
+    return await ejecutarPG(herramienta, args);
+  } catch (error) {
+    const detalle = describirFalloPG(error, herramienta);
+    console.error(`[respaldo] Fallo de ${herramienta}: ${detalle}`);
+    if (detalle.includes("no está instalada")) {
+      throw new ErrorNegocio("HERRAMIENTA_PG_NO_DISPONIBLE", 500);
+    }
+    if (/permission denied to create database|no le está permitido crear bases/i.test(detalle)) {
+      throw new ErrorNegocio("RESPALDO_PERMISO_CREATEDB", 500);
+    }
+    if (/connection .* (refused|failed|timed out)|could not connect/i.test(detalle)) {
+      throw new ErrorNegocio("BD_NO_DISPONIBLE", 503);
+    }
+    throw new ErrorNegocio(codigoFallo, 409);
+  }
 }
 
 // ============================================================
@@ -258,12 +434,13 @@ function aRestauracion(r: {
 }
 
 // ============================================================
-// CREAR RESPALDO
+// CREAR RESPALDO (pg_dump, formato custom)
 // ============================================================
 
 /**
  * Crea un respaldo completo y consistente de la base de datos
- * (VACUUM INTO: instantánea atómica aunque haya actividad en curso).
+ * (pg_dump --format=custom: instantánea MVCC aunque haya actividad
+ * en curso; archivo comprimido restaurable con pg_restore).
  */
 export async function crearRespaldo(args: {
   tipo: "MANUAL" | "AUTOMATICO" | "PRE_RESTAURACION";
@@ -272,16 +449,31 @@ export async function crearRespaldo(args: {
 }): Promise<FilaRespaldo> {
   const carpeta = carpetaRespaldos();
   const sufijo = args.tipo === "MANUAL" ? "man" : args.tipo === "AUTOMATICO" ? "aut" : "pre";
+  const conn = analizarURLPostgres();
 
-  // Nombre único: respaldo-AAAAMMDD-HHmmss-<tipo>.db
-  let archivo = `respaldo-${marcaTiempo()}-${sufijo}.db`;
+  // Nombre único: respaldo-AAAAMMDD-HHmmss-<tipo>.dump
+  let archivo = `respaldo-${marcaTiempo()}-${sufijo}${EXTENSION_RESPALDO}`;
   for (let i = 2; fs.existsSync(path.join(carpeta, archivo)); i++) {
-    archivo = `respaldo-${marcaTiempo()}-${sufijo}-${i}.db`;
+    archivo = `respaldo-${marcaTiempo()}-${sufijo}-${i}${EXTENSION_RESPALDO}`;
   }
+  const destino = path.join(carpeta, archivo);
 
-  await db.$executeRawUnsafe(`VACUUM INTO '${escSql(path.join(carpeta, archivo))}'`);
+  // pg_dump: la ruta del archivo viaja como ARGUMENTO de execFile (sin
+  // shell intermedio); la contraseña jamás toca argv (ver ejecutarPG).
+  await ejecutarPGO(
+    "pg_dump",
+    [
+      "--format=custom",
+      "--file",
+      destino,
+      ...argumentosConexion(conn),
+      "--dbname",
+      conn.base,
+    ],
+    "RESPALDO_FALLIDO",
+  );
 
-  const tamanoBytes = fs.statSync(path.join(carpeta, archivo)).size;
+  const tamanoBytes = fs.statSync(destino).size;
   const totalRegistros = await contarRegistros(db);
   const fila = await db.respaldoBD.create({
     data: {
@@ -307,22 +499,46 @@ async function contarRegistros(cliente: PrismaClient | PrismaTx): Promise<number
 }
 
 // ============================================================
-// VALIDACIÓN Y LECTURA DE UN RESPALDO
+// VALIDACIÓN Y LECTURA DE UN RESPALDO (base transitoria)
 // ============================================================
 
-/** Abre un cliente lector sobre el archivo de respaldo */
-function lectorDe(archivo: string): PrismaClient {
-  return new PrismaClient({
-    datasources: { db: { url: `file:${rutaRespaldo(archivo)}?connection_limit=1` } },
-  });
+/**
+ * Tablas de datos presentes en la base conectada (information_schema,
+ * consulta de catálogo con parámetro enlazado; excluye la bitácora de
+ * migraciones de Prisma, que no forma parte del modelo de negocio).
+ */
+async function tablasEnBase(cliente: PrismaClient): Promise<Set<string>> {
+  const filas = await cliente.$queryRaw<Array<{ tabla: string }>>(
+    Prisma.sql`SELECT table_name AS tabla FROM information_schema.tables WHERE table_schema = ${ESQUEMA_DATOS}`,
+  );
+  return new Set(filas.map((f) => f.tabla).filter((t) => t !== "_prisma_migrations"));
 }
 
-/** Nombres de las tablas presentes en un archivo de respaldo */
-async function tablasEnArchivo(lector: PrismaClient): Promise<Set<string>> {
-  const tablas = await lector.$queryRawUnsafe<{ name: string }[]>(
-    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_prisma_migrations'",
+/**
+ * Columnas de la llave primaria de cada tabla (para la paginación
+ * DETERMINISTA de la copia: sin ORDER BY estable, OFFSET puede repetir
+ * o saltar filas). Consulta de catálogo con parámetro enlazado.
+ */
+async function columnasLlavePrimaria(cliente: PrismaClient): Promise<Map<string, string[]>> {
+  const filas = await cliente.$queryRaw<Array<{ tabla: string; columna: string }>>(
+    Prisma.sql`
+      SELECT tc.table_name AS tabla, kcu.column_name AS columna
+      FROM information_schema.table_constraints tc
+      JOIN information_schema.key_column_usage kcu
+        ON kcu.constraint_name = tc.constraint_name
+       AND kcu.table_schema = tc.table_schema
+       AND kcu.table_name = tc.table_name
+      WHERE tc.constraint_type = 'PRIMARY KEY'
+        AND tc.table_schema = ${ESQUEMA_DATOS}
+      ORDER BY tc.table_name, kcu.ordinal_position`,
   );
-  return new Set(tablas.map((t) => t.name));
+  const mapa = new Map<string, string[]>();
+  for (const f of filas) {
+    const actuales = mapa.get(f.tabla) ?? [];
+    actuales.push(f.columna);
+    mapa.set(f.tabla, actuales);
+  }
+  return mapa;
 }
 
 /**
@@ -343,84 +559,156 @@ function esquemaCompatible(presentes: Set<string>): boolean {
 }
 
 /**
- * Validación RÁPIDA de un archivo de respaldo (sin copiar datos):
- * integridad física (quick_check), esquema compatible y conteo de
- * registros. Lanza ErrorNegocio (RESPALDO_CORRUPTO / RESPALDO_INCOMPATIBLE)
- * si el archivo no es utilizable.
+ * Nombres de las tablas (objeto TABLE) que declara el TOC de un
+ * volcado custom, según pg_restore --list (sin conexión a BD: lee la
+ * cabecera del archivo). Una línea TABLE tiene la forma:
+ *   <dumpid>; <oid> <oid> TABLE <esquema> <tabla> <dueño>
+ * (las entradas TABLE DATA llevan el literal «DATA» tras TABLE y se
+ * descartan aquí).
  */
-async function validarArchivoRespaldo(nombre: string): Promise<number> {
-  const lector = lectorDe(nombre);
-  try {
-    // 1. Integridad física (un archivo ilegible también cae aquí)
-    let integro = false;
-    try {
-      const check = await lector.$queryRawUnsafe<{ quick_check: string }[]>("PRAGMA quick_check");
-      integro = check[0]?.quick_check === "ok";
-    } catch {
-      integro = false;
-    }
-    if (!integro) throw new ErrorNegocio("RESPALDO_CORRUPTO", 409);
-
-    // 2. Esquema compatible
-    let compatible = false;
-    try {
-      compatible = esquemaCompatible(await tablasEnArchivo(lector));
-    } catch {
-      compatible = false;
-    }
-    if (!compatible) throw new ErrorNegocio("RESPALDO_INCOMPATIBLE", 409);
-
-    // 3. Conteo de registros de datos (una sola consulta)
-    const conteo = await lector.$queryRawUnsafe<{ total: number | bigint }[]>(
-      `SELECT ${ordenTablas().insercion.map((m) => `(SELECT COUNT(*) FROM "${m}")`).join(" + ")} AS total`,
-    );
-    return Number(conteo[0]?.total ?? 0);
-  } finally {
-    await lector.$disconnect().catch(() => undefined);
+function tablasDelTOC(salida: string): Set<string> {
+  const tablas = new Set<string>();
+  for (const linea of salida.split("\n")) {
+    const campos = linea.trim().split(/\s+/);
+    if (campos.length < 6) continue;
+    if (campos[3] !== "TABLE" || campos[4] === "DATA") continue;
+    if (campos[4] === ESQUEMA_DATOS) tablas.add(campos[5]);
   }
+  return tablas;
 }
 
 /**
- * Valida un archivo de respaldo y devuelve TODO su contenido leído
- * en memoria (orden de inserción). Se llama ANTES de escribir nada:
- * un archivo corrupto o de un esquema incompatible falla aquí, sin
- * tocar la base viva.
+ * Validación RÁPIDA de un archivo de respaldo (sin copiar datos ni
+ * crear bases): cabecera legible por pg_restore --list (integridad del
+ * contenedor) y esquema compatible (tablas declaradas en el TOC).
+ * Lanza ErrorNegocio (RESPALDO_CORRUPTO / RESPALDO_INCOMPATIBLE) si el
+ * archivo no es utilizable.
+ *
+ * Devuelve el total de registros DECLARADO (0 = se determinará al
+ * restaurar: los volcados custom no registran conteos por tabla; el
+ * conteo exacto se verifica en la base transitoria al restaurar).
  */
-async function leerRespaldo(archivo: string): Promise<{ datos: Map<string, object[]>; total: number }> {
-  const lector = lectorDe(archivo);
+async function validarArchivoRespaldo(nombre: string): Promise<number> {
+  const ruta = rutaRespaldo(nombre);
+  const salida = await ejecutarPGO("pg_restore", ["--list", ruta], "RESPALDO_CORRUPTO");
+  if (!esquemaCompatible(tablasDelTOC(salida))) {
+    throw new ErrorNegocio("RESPALDO_INCOMPATIBLE", 409);
+  }
+  return 0;
+}
+
+/**
+ * Restaura el volcado en una BASE TRANSITORIA (creada para la
+ * validación) y devuelve el cliente Prisma conectado a ella junto con
+ * el conteo total verificado. El llamador DEBE desconectar el cliente
+ * y eliminar la base transitoria (eliminarBaseTransitoria) al terminar.
+ *
+ * Requisito: el usuario de la app necesita CREATEDB (documentado en
+ * .env.example y provisionado por setup.sh / deploy.sh / docker-compose).
+ * El nombre de la base es generado internamente (sin entrada de
+ * usuario) y validado contra ^[a-z0-9_]+$ antes del único DDL.
+ */
+async function restaurarAVerificacion(
+  archivo: string,
+): Promise<{ lector: PrismaClient; baseTransitoria: string; total: number }> {
+  const conn = analizarURLPostgres();
+  const baseTransitoria = `cig_restauracion_${marcaTiempo().replace(/-/g, "")}_${sufijoAleatorio()}`;
+  if (!/^[a-z0-9_]+$/.test(baseTransitoria)) {
+    // Inalcanzable por construcción (defensa en profundidad ante el DDL).
+    throw new Error("Identificador de base transitoria inválido");
+  }
+  const ruta = rutaRespaldo(archivo);
+
+  // 1. Crear la base transitoria (identificador doble-quoteado).
+  await ejecutarPGO(
+    "psql",
+    [
+      ...argumentosConexion(conn),
+      "--dbname",
+      "postgres",
+      "--set",
+      "ON_ERROR_STOP=1",
+      "--command",
+      `CREATE DATABASE "${baseTransitoria}";`,
+    ],
+    "RESPALDO_FALLIDO",
+  );
+
+  // 2. Restaurar el volcado completo ahí (exit-on-error: el menor
+  //    problema de datos aborta toda la restauración transitoria).
   try {
-    // 1. Integridad física + esquema compatible (mismas reglas que al subir)
-    let integro = false;
-    try {
-      const check = await lector.$queryRawUnsafe<{ quick_check: string }[]>("PRAGMA quick_check");
-      integro = check[0]?.quick_check === "ok";
-    } catch {
-      integro = false;
-    }
-    if (!integro) throw new ErrorNegocio("RESPALDO_CORRUPTO", 409);
-    if (!esquemaCompatible(await tablasEnArchivo(lector))) {
+    await ejecutarPGO(
+      "pg_restore",
+      [
+        "--exit-on-error",
+        "--no-owner",
+        "--no-privileges",
+        ...argumentosConexion(conn),
+        "--dbname",
+        baseTransitoria,
+        ruta,
+      ],
+      "RESPALDO_CORRUPTO",
+    );
+  } catch (e) {
+    await eliminarBaseTransitoria(baseTransitoria).catch(() => undefined);
+    throw e;
+  }
+
+  // 3. Conectar el cliente lector a la base transitoria.
+  const urlTransitoria = new URL(process.env.DATABASE_URL ?? "");
+  urlTransitoria.pathname = `/${baseTransitoria}`;
+  const lector = new PrismaClient({
+    datasources: { db: { url: urlTransitoria.toString() } },
+  });
+
+  try {
+    // 4. Validación de esquema + conteo exacto (columnas incluidas:
+    //    cualquier divergencia de columnas estalla en findMany/count).
+    const presentes = await tablasEnBase(lector);
+    if (!esquemaCompatible(presentes)) {
       throw new ErrorNegocio("RESPALDO_INCOMPATIBLE", 409);
     }
-
-    // 2. Lectura completa (cualquier divergencia de columnas estalla aquí)
-    const datos = new Map<string, object[]>();
-    let total = 0;
-    for (const modelo of ordenTablas().insercion) {
-      const filas = await delegado(lector, modelo).findMany();
-      datos.set(modelo, filas);
-      total += filas.length;
-    }
-    return { datos, total };
+    const total = await contarRegistros(lector);
+    return { lector, baseTransitoria, total };
   } catch (e) {
+    await lector.$disconnect().catch(() => undefined);
+    await eliminarBaseTransitoria(baseTransitoria).catch(() => undefined);
     if (e instanceof ErrorNegocio) throw e;
-    // Error de lectura → esquema distinto o archivo dañado (con detalle en el log)
     console.error(
-      `[respaldo] No se pudo leer «${archivo}»: ${e instanceof Error ? e.message : String(e)}`,
+      `[respaldo] No se pudo validar la restauración de «${archivo}»: ${sanearParaLog(
+        e instanceof Error ? e.message : String(e),
+      )}`,
     );
     throw new ErrorNegocio("RESPALDO_INCOMPATIBLE", 409);
-  } finally {
-    await lector.$disconnect().catch(() => undefined);
   }
+}
+
+/** Elimina la base transitoria (identificador generado + validado). */
+async function eliminarBaseTransitoria(baseTransitoria: string): Promise<void> {
+  if (!/^[a-z0-9_]+$/.test(baseTransitoria)) return;
+  const conn = analizarURLPostgres();
+  await ejecutarPG(
+    "psql",
+    [
+      ...argumentosConexion(conn),
+      "--dbname",
+      "postgres",
+      "--set",
+      "ON_ERROR_STOP=1",
+      "--command",
+      `DROP DATABASE IF EXISTS "${baseTransitoria}";`,
+    ],
+  ).catch((error) => {
+    // No interrumpe la operación principal: queda rastro auditable
+    // para limpieza manual (el nombre es determinista y trazable).
+    console.warn(
+      `[respaldo] No se pudo eliminar la base transitoria «${baseTransitoria}»: ${describirFalloPG(
+        error,
+        "psql",
+      )}`,
+    );
+  });
 }
 
 // ============================================================
@@ -428,15 +716,15 @@ async function leerRespaldo(archivo: string): Promise<{ datos: Map<string, objec
 // ============================================================
 
 /**
- * Registra un respaldo subido manualmente (p. ej. un archivo .db
+ * Registra un respaldo subido manualmente (p. ej. un archivo .dump
  * descargado antes con «Descargar» y guardado fuera de la máquina).
  *
- * El archivo se valida ANTES de quedar disponible: integridad física,
- * esquema compatible y conteo. Si algo falla, la subida se rechaza con
- * el error concreto y NO queda rastro en la carpeta. Si pasa, se
- * publica como respaldo-<marca>-sub.db y queda en la lista como
- * SUBIDO, restaurable igual que cualquier otro respaldo (en caliente,
- * con snapshot previo y ventana de reversión de 24 h).
+ * El archivo se valida ANTES de quedar disponible: cabecera PGDMP,
+ * integridad del contenedor (pg_restore --list) y esquema compatible.
+ * Si algo falla, la subida se rechaza con el error concreto y NO queda
+ * rastro en la carpeta. Si pasa, se publica como respaldo-<marca>-sub.dump
+ * y queda en la lista como SUBIDO, restaurable igual que cualquier otro
+ * respaldo (en caliente, con snapshot previo y ventana de reversión).
  */
 export async function subirRespaldo(args: {
   bytes: Buffer;
@@ -451,14 +739,14 @@ export async function subirRespaldo(args: {
     if (args.bytes.length > TAMANO_MAX_SUBIDA_BYTES) {
       throw new ErrorNegocio("ARCHIVO_MUY_GRANDE", 413);
     }
-    if (args.bytes.subarray(0, 16).toString("latin1") !== MAGICO_SQLITE) {
-      throw new ErrorNegocio("ARCHIVO_NO_SQLITE", 400);
+    if (args.bytes.subarray(0, 5).toString("latin1") !== MAGICO_PG_DUMP) {
+      throw new ErrorNegocio("ARCHIVO_NO_RESPALDO", 400);
     }
 
-    // 2. Destino único: respaldo-AAAAMMDD-HHmmss-sub.db
-    let archivo = `respaldo-${marcaTiempo()}-sub.db`;
+    // 2. Destino único: respaldo-AAAAMMDD-HHmmss-sub.dump
+    let archivo = `respaldo-${marcaTiempo()}-sub${EXTENSION_RESPALDO}`;
     for (let i = 2; fs.existsSync(path.join(carpeta, archivo)); i++) {
-      archivo = `respaldo-${marcaTiempo()}-sub-${i}.db`;
+      archivo = `respaldo-${marcaTiempo()}-sub-${i}${EXTENSION_RESPALDO}`;
     }
     // Temporal con sufijo .tmp (invisible para el escáner de la carpeta)
     const temporal = path.join(carpeta, `.${archivo}.tmp`);
@@ -472,7 +760,9 @@ export async function subirRespaldo(args: {
       fs.rmSync(temporal, { force: true });
       if (e instanceof ErrorNegocio) throw e;
       console.error(
-        `[respaldo] Subida rechazada «${args.nombreOriginal}»: ${e instanceof Error ? e.message : String(e)}`,
+        `[respaldo] Subida rechazada «${args.nombreOriginal}»: ${sanearParaLog(
+          e instanceof Error ? e.message : String(e),
+        )}`,
       );
       throw new ErrorNegocio("RESPALDO_INCOMPATIBLE", 409);
     }
@@ -517,10 +807,12 @@ export type ResultadoRestauracion = {
 };
 
 /**
- * Núcleo de restauración: valida y lee el respaldo, crea el snapshot
- * pre-restauración (punto de reversión) y reemplaza los datos en una
- * única transacción. Si la transacción falla, SQLite revierte todo:
- * la base queda intacta y el intento queda registrado como FALLIDA.
+ * Núcleo de restauración: valida el respaldo restaurándolo a una base
+ * transitoria (esquema + conteos verificados sin tocar la base viva),
+ * crea el snapshot pre-restauración (punto de reversión) y reemplaza
+ * los datos en una única transacción con copia POR LOTES (memoria
+ * acotada). Si la transacción falla, PostgreSQL revierte todo: la base
+ * queda intacta y el intento queda registrado como FALLIDA.
  */
 async function restaurarNucleo(args: {
   respaldoId: string;
@@ -534,12 +826,10 @@ async function restaurarNucleo(args: {
 
   const archivo = rutaRespaldo(respaldo.archivo);
   if (!fs.existsSync(archivo)) throw new ErrorNegocio("ARCHIVO_NO_DISPONIBLE", 409);
-  if (path.resolve(archivo) === path.resolve(rutaBaseDatos())) {
-    throw new ErrorNegocio("ARCHIVO_INVALIDO", 400);
-  }
 
-  // 1. Validar y leer TODO el respaldo (antes de escribir un solo dato)
-  const { datos, total } = await leerRespaldo(respaldo.archivo);
+  // 1. Validar TODO el respaldo en la base transitoria (antes de
+  //    escribir un solo dato de la base viva).
+  const { lector, baseTransitoria, total } = await restaurarAVerificacion(respaldo.archivo);
 
   // 2. Snapshot pre-restauración: el punto de reversión de 24 h
   const snapshot = await crearRespaldo({
@@ -560,33 +850,57 @@ async function restaurarNucleo(args: {
     },
   });
 
+  // Columnas de llave primaria por tabla (paginación determinista).
+  const llavesPorTabla = await columnasLlavePrimaria(lector);
+
   const t0 = Date.now();
   try {
-    // 4. Reemplazo completo EN UNA TRANSACCIÓN: o entra todo, o no entra nada
-    //    (con reintentos de la Fase 3: un cerrojo externo transitorio no
-    //    aborta la restauración; el callback se re-ejecuta completo).
+    // 4. Reemplazo completo EN UNA TRANSACCIÓN: o entra todo, o no
+    //    entra nada (con reintentos: una anomalía transitoria 40001/40P01
+    //    no aborta la restauración; el callback se re-ejecuta completo).
+    //    Copia por lotes: lectura paginada desde la base transitoria +
+    //    createMany por lote — memoria O(lote), nunca O(base completa).
     await transaccion(
       async (tx) => {
         for (const modelo of ordenTablas().borrado) {
           await delegado(tx, modelo).deleteMany();
         }
         for (const modelo of ordenTablas().insercion) {
-          const filas = datos.get(modelo) ?? [];
-          for (let i = 0; i < filas.length; i += FILAS_POR_LOTE) {
-            await delegado(tx, modelo).createMany({ data: filas.slice(i, i + FILAS_POR_LOTE) });
+          const llaves = llavesPorTabla.get(modelo);
+          if (!llaves || llaves.length === 0) {
+            throw new Error(`Sin llave primaria declarada en la base transitoria: ${modelo}`);
+          }
+          // Orden estable para la paginación con OFFSET: un objeto por
+          // columna de la llave (forma de ARRAY). La forma «objeto plano»
+          // con varias columnas es rechazada por el validador del cliente
+          // en modelos con llave primaria COMPUESTA (p. ej. ModeloParte);
+          // el array de objetos es válido para todos y produce el mismo
+          // orden determinista.
+          const orderBy = llaves.map((c) => ({ [c]: "asc" }));
+          let leidos = 0;
+          for (;;) {
+            const lote = await delegado(lector, modelo).findMany({
+              orderBy,
+              take: FILAS_POR_LOTE,
+              skip: leidos,
+            });
+            if (lote.length === 0) break;
+            await delegado(tx, modelo).createMany({ data: lote });
+            leidos += lote.length;
+            if (lote.length < FILAS_POR_LOTE) break;
           }
         }
       },
       { timeout: 120_000, maxWait: 10_000 },
     );
   } catch (e) {
-    // Rollback automático de SQLite: la base quedó intacta
+    // Rollback automático de PostgreSQL: la base quedó intacta
     const fallida = await db.restauracionBD.update({
       where: { id: registro.id },
       data: {
         estado: "FALLIDA",
         duracionMs: Date.now() - t0,
-        error: e instanceof Error ? e.message.slice(0, 500) : "ERROR_DESCONOCIDO",
+        error: sanearParaLog(e instanceof Error ? e.message : "ERROR_DESCONOCIDO").slice(0, 500),
       },
     });
     return {
@@ -599,6 +913,10 @@ async function restaurarNucleo(args: {
         tipo: args.tipo,
       },
     };
+  } finally {
+    // La base transitoria y su conexión se liberan SIEMPRE.
+    await lector.$disconnect().catch(() => undefined);
+    await eliminarBaseTransitoria(baseTransitoria);
   }
 
   // 5. Éxito: ventana de reversión de 24 h
@@ -702,13 +1020,22 @@ export async function eliminarRespaldo(id: string): Promise<{ ok: true }> {
   return { ok: true };
 }
 
-/** Descarga un respaldo (el archivo completo .db) */
-export async function descargarRespaldo(id: string): Promise<{ buffer: Buffer; archivo: string }> {
+/**
+ * Descarga un respaldo (el volcado completo .dump) EN STREAMING: el
+ * archivo nunca se carga entero en memoria del proceso de Node/Bun.
+ */
+export async function descargarRespaldo(id: string): Promise<{
+  flujo: ReadableStream<Uint8Array>;
+  archivo: string;
+  tamanoBytes: number;
+}> {
   const respaldo = await db.respaldoBD.findUnique({ where: { id } });
   if (!respaldo) throw new ErrorNegocio("RESPALDO_NO_EXISTE", 404);
   const archivo = rutaRespaldo(respaldo.archivo);
   if (!fs.existsSync(archivo)) throw new ErrorNegocio("ARCHIVO_NO_DISPONIBLE", 409);
-  return { buffer: fs.readFileSync(archivo), archivo: respaldo.archivo };
+  const tamanoBytes = fs.statSync(archivo).size;
+  const flujo = Readable.toWeb(createReadStream(archivo)) as ReadableStream<Uint8Array>;
+  return { flujo, archivo: respaldo.archivo, tamanoBytes };
 }
 
 // ============================================================
@@ -796,8 +1123,8 @@ async function limpiezaRespaldos() {
   }
 }
 
-/** Detecta archivos .db en la carpeta sin registro y los incorpora
- *  (validando esquema e integridad) como respaldos DETECTADO. */
+/** Detecta archivos .dump en la carpeta sin registro y los incorpora
+ *  (validando integridad y esquema) como respaldos DETECTADO. */
 async function sincronizarCarpeta() {
   const carpeta = carpetaRespaldos();
   const existentes = new Set(
@@ -805,13 +1132,13 @@ async function sincronizarCarpeta() {
   );
   const enDisco = fs
     .readdirSync(carpeta)
-    .filter((n) => n.toLowerCase().endsWith(".db") && !existentes.has(n));
+    .filter((n) => n.toLowerCase().endsWith(EXTENSION_RESPALDO) && !existentes.has(n));
 
   for (const nombre of enDisco) {
     let compatible = true;
     let totalRegistros = 0;
     try {
-      // Validación ligera: integridad + esquema + conteo en una sola pasada
+      // Validación ligera: cabecera + esquema declarado (pg_restore --list)
       totalRegistros = await validarArchivoRespaldo(nombre);
     } catch {
       compatible = false;
@@ -841,6 +1168,23 @@ async function leerRestauraciones<T>(
     return await consulta();
   } catch {
     return null;
+  }
+}
+
+/**
+ * Tamaño en bytes de la base de datos viva según el SERVIDOR
+ * (pg_database_size; consulta de catálogo sin entrada de usuario).
+ * BigInt → Number: los tamaños de esta escala caben en double.
+ */
+async function tamanoBaseDatos(): Promise<number> {
+  try {
+    const filas = await db.$queryRaw<Array<{ tamano: bigint }>>(
+      Prisma.sql`SELECT pg_database_size(current_database()) AS tamano`,
+    );
+    return Number(filas[0]?.tamano ?? 0);
+  } catch {
+    /* catálogo inaccesible: se reporta 0 */
+    return 0;
   }
 }
 
@@ -894,20 +1238,13 @@ export async function obtenerEstadoRespaldo(): Promise<EstadoRespaldo> {
   const autoPendiente =
     !ultimoUtil || Date.now() - ultimoUtil.creadoEn.getTime() >= 24 * 3600_000;
 
-  let tamanoBaseBytes = 0;
-  try {
-    tamanoBaseBytes = fs.statSync(rutaBaseDatos()).size;
-  } catch {
-    /* base no accesible por fs: se reporta 0 */
-  }
-
   return {
     respaldos: respaldos.map(aRespaldo),
     ultimaRestauracion: ultima ? aRestauracion(ultima) : null,
     reversion,
     autoPendiente,
     totalRegistrosVivos: await contarRegistros(db),
-    tamanoBaseBytes,
+    tamanoBaseBytes: await tamanoBaseDatos(),
   };
 }
 

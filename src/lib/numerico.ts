@@ -14,10 +14,10 @@
  *
  * ÚNICA fuente de aritmética para cantidades de inventario, costos y
  * medidas del sistema. Las columnas persisten como TEXTO decimal exacto
- * (String en Prisma): SQLite no tiene DECIMAL nativo y el tipo Decimal de
- * Prisma sobre SQLite persiste REAL/float64 (verificado empíricamente:
- * increment de 0.1 ×3 → 0.30000000000000004, typeof = 'real'), lo que
- * viola la política de integridad numérica.
+ * (String en Prisma): el motor de archivo anterior carecía de DECIMAL
+ * nativo y el mapeo Decimal de Prisma sobre él persistía REAL/float64
+ * (verificado empíricamente: increment de 0.1 ×3 → 0.30000000000000004,
+ * typeof = 'real'), lo que violaba la política de integridad numérica.
  *
  * Reglas:
  *   · Prohibido Float/Double para cantidades, costos o medidas.
