@@ -31,7 +31,7 @@ export const diccionario = {
       proximo: "Próximamente",
       idioma: "Idioma",
       menu: "Menú",
-      version: "v1.1.1",
+      version: "v2.0.0",
       derechos: "Sistema de gestión para plantas de manufactura",
     },
     comun: {
@@ -955,7 +955,7 @@ export const diccionario = {
       proximo: "Coming soon",
       idioma: "Language",
       menu: "Menu",
-      version: "v1.1.1",
+      version: "v2.0.0",
       derechos: "Management system for manufacturing plants",
     },
     comun: {
