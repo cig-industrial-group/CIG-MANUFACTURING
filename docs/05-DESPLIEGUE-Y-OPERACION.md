@@ -1,11 +1,14 @@
 # 05 — Despliegue y Operación
 
-> **Proyecto:** CIG-MANUFACTURING · **Versión documentada:** 1.1.1 · **Rama:** `main`
+> **Proyecto:** CIG-MANUFACTURING · **Versión documentada:** 2.0.0 · **Rama:** `main`
 > Suite de documentación arquitectónica — Parte 5 de 6.
 >
 > Este documento consolida y actualiza `README-DEPLOY.md` (que mantiene vigencia como
-> guía detallada del instalador) y **reemplaza** al deprecado `DESPLIEGUE.md`. Para
-> instalaciones locales de desarrollo/evaluación con `setup.sh`/`start.sh`, ver §6.
+> guía detallada del instalador) y sustituyó —y retiró en la 2.0.0— al deprecado
+> `DESPLIEGUE.md` de la era 1.x. **Requisito obligatorio desde la 2.0.0: PostgreSQL 16+**
+> como motor de base de datos (ADR-009). Para instalaciones locales de
+> desarrollo/evaluación con `setup.sh`/`start.sh`, ver §6; para actualizar desde la
+> v1.1.1, ver la guía de migración de `README-DEPLOY.md` §8.
 
 ---
 
@@ -18,10 +21,10 @@
 | `/home/cig-manufacturing` | Home del usuario de servicio **cig-manufacturing** (sin sudo, sin grupos privilegiados) |
 | `/home/cig-manufacturing/CIG-MANUFACTURING` | Código de la aplicación (`APP_DIR`); propiedad recursiva del usuario de servicio |
 | `/home/cig-manufacturing/.bun/bin/bun` | Runtime Bun del usuario de servicio |
-| `…/CIG-MANUFACTURING/db/production.db` | Base de datos SQLite (`DATABASE_URL`) |
-| `…/CIG-MANUFACTURING/db/backups/` | Respaldos del módulo Respaldo (incluye los automáticos, últimos 7) |
+| `…/CIG-MANUFACTURING/db/` | `DATA_DIR` de la instalación: respaldos `.dump`, branding y credenciales (la base de datos vive en el **clúster PostgreSQL 16 local**, servicio `postgresql@16-main`) |
+| `…/CIG-MANUFACTURING/db/backups/` | Respaldos del módulo Respaldo (`DATA_DIR/backups`: volcados `pg_dump` formato *custom*, incluye los automáticos, últimos 7) |
 | `…/CIG-MANUFACTURING/logs/stdout.log` · `stderr.log` | Logs del servicio (systemd `append:`) |
-| `…/CIG-MANUFACTURING/.env` | Entorno (600, propietario del servicio): `NODE_ENV`, `AUTH_SECRET`, `DATABASE_URL`, `INITIAL_ADMIN_PASSWORD` y `NEXTAUTH_URL` (dominio) o `COOKIE_INSEGURA_HTTP=1` (local) |
+| `…/CIG-MANUFACTURING/.env` | Entorno (600, propietario del servicio): `NODE_ENV`, `AUTH_SECRET`, `DATABASE_URL` (PostgreSQL), `DATA_DIR`, `INITIAL_ADMIN_PASSWORD` y `NEXTAUTH_URL` (dominio) o `COOKIE_INSEGURA_HTTP=1` (local) |
 | `/etc/systemd/system/cig-manufacturing.service` | Servicio de la app (lo genera `deploy.sh`; NO editar a mano: se regenera) |
 | `/etc/systemd/system/caddy.service` | Proxy inverso endurecido |
 | `/etc/caddy/Caddyfile` | Configuración del proxy (640, root:caddy) |
@@ -124,15 +127,18 @@ sockets no pueden convivir en el mismo puerto (`EADDRINUSE`).
    `logs/`, `.env`, respaldos, logs sueltos, `credenciales-iniciales.txt`); propiedad
    recursiva del servicio; `APP_DIR` con permisos 750.
 8. **`.env`**: solo si no existe (re-ejecuciones: se conserva y se valida su
-   `AUTH_SECRET`); `AUTH_SECRET` generado con `openssl rand -base64 48`;
-   `DATABASE_URL` absoluta; permisos 600.
+   `AUTH_SECRET` **y que su `DATABASE_URL` sea de PostgreSQL**); `AUTH_SECRET`
+   generado con `openssl rand -base64 48`; `DATABASE_URL` de PostgreSQL con
+   contraseña aleatoria y `DATA_DIR`; permisos 600.
 9. **Compilación** como usuario de servicio con entorno limpio (`env -i`, para que
    variables de root no pisen el `.env`): `bun install --frozen-lockfile` →
-   `bunx prisma generate` → `mkdir db logs` (umask 077) → `bunx prisma db push
-   --skip-generate` → `bunx prisma db seed` → `NEXT_TELEMETRY_DISABLED=1 bun run
-   build` → `mkdir .next/standalone/.next/cache`.
+   `bunx prisma generate` → `mkdir db logs` (umask 077) → `bunx prisma migrate
+   deploy` (esquema por **migraciones auditables**, registradas en
+   `_prisma_migrations`) → `bunx prisma db seed` → `NEXT_TELEMETRY_DISABLED=1 bun
+   run build` → `mkdir .next/standalone/.next/cache`.
 10. **systemd + Caddy**: escribe `cig-manufacturing.service` (aislamiento extremo, ver
-    [02-ARQUITECTURA-DEL-SISTEMA.md](./02-ARQUITECTURA-DEL-SISTEMA.md) §3.2),
+    [02-ARQUITECTURA-DEL-SISTEMA.md](./02-ARQUITECTURA-DEL-SISTEMA.md) §3.2;
+    **dependencia del motor de BD: `After/Wants=postgresql.service`**),
     `caddy.service`, el `Caddyfile` con cabeceras de seguridad, la rotación de logs;
     valida el Caddyfile (`caddy validate`) y habilita + reinicia ambos servicios.
 11. **Verificación**: espera a que la app responda en `127.0.0.1:<puerto>/api`
@@ -143,8 +149,8 @@ sockets no pueden convivir en el mismo puerto (`EADDRINUSE`).
 
 **Idempotencia:** puede re-ejecutarse sin riesgo: no duplica el usuario, no regenera
 secretos existentes, no toca `db/`, `logs/`, `.env` ni respaldos, no recompila Caddy si
-ya tiene el plugin, `prisma db push` sincroniza esquema y la semilla solo crea el admin
-si la base está vacía. **Los datos y usuarios sobreviven.**
+ya tiene el plugin, `prisma migrate deploy` aplica solo las migraciones pendientes y
+la semilla solo crea el admin si la base está vacía. **Los datos y usuarios sobreviven.**
 
 ### 2.7 Desplegar una nueva versión del código
 
@@ -224,11 +230,12 @@ Verificar que está activa: `systemctl list-timers | grep -i logrotate`.
   (`debeCambiarPassword=true`). Si aparece `db/credenciales-iniciales.txt` (solo lo crea
   la semilla sin `INITIAL_ADMIN_PASSWORD`), leer, cambiar la contraseña y **borrar el
   archivo**.
-- **Respaldo externo recomendado**: el módulo Respaldo gestiona `db/backups/` en el
-  propio disco; copie periódicamente esos archivos (o descárguelos desde la UI:
-  Sistema → Respaldo) a almacenamiento fuera del servidor. La BD es un solo archivo:
-  `sqlite3 …/db/production.db ".backup '/ruta/segura/cig-$(date +%F).db'"` también
-  produce una copia consistente en caliente.
+- **Respaldo externo recomendado**: el módulo Respaldo gestiona `db/backups/`
+  (`DATA_DIR/backups`) en el propio disco; copie periódicamente esos archivos (o
+  descárguelos desde la UI: Sistema → Respaldo) a almacenamiento fuera del servidor.
+  Desde consola, `pg_dump` produce una copia consistente en caliente:
+  `pg_dump --format=custom --file=/backups/cig-$(date +%F).dump "$DATABASE_URL"`
+  (restaurable con la propia aplicación o con `pg_restore`).
 - **Forzar recompilación de Caddy** (p. ej. al cambiar de modo local a dominio en la
   misma máquina): `sudo rm /usr/local/bin/caddy && sudo ./deploy.sh`.
 - **Cambios de `.env`**: editar el archivo y `systemctl restart cig-manufacturing`.
@@ -243,18 +250,19 @@ Verificar que está activa: `systemctl list-timers | grep -i logrotate`.
 
 Permisos necesarios: `respaldo.gestionar` (Sistema → Respaldo).
 
-- **Crear respaldo**: instantánea consistente `VACUUM INTO` hacia `db/backups/` sin
-  detener la planta. Registro en la tabla `RespaldoBD` con tamaño, total de registros y
-  compatibilidad de esquema.
+- **Crear respaldo**: instantánea consistente con `pg_dump --format=custom` (volcado
+  comprimido `.dump`) hacia `DATA_DIR/backups/`, sin detener la planta. Registro en la
+  tabla `RespaldoBD` con tamaño, total de registros y compatibilidad de esquema.
 - **Respaldo automático**: al abrir el módulo, respaldo diario `AUTOMATICO` conservando
   los últimos 7.
 - **Restauración EN CALIENTE** (procedimiento operativo):
-  1. Sistema → Respaldo → seleccionar archivo (se valida `PRAGMA quick_check` y
-     compatibilidad de esquema antes de tocar nada).
-  2. Confirmar. La restauración **no reinicia el servidor**: una única transacción
-     reemplaza todos los datos. Si falla a mitad, SQLite revierte todo y la base queda
-     exactamente como estaba (rollback automático; el intento queda `FALLIDA` en la
-     bitácora `RestauracionBD`).
+  1. Sistema → Respaldo → seleccionar archivo (se valida la integridad del volcado con
+     `pg_restore --list` — cabecera y esquema declarado — y su compatibilidad con el
+     esquema vigente antes de tocar nada).
+  2. Confirmar. La restauración **no reinicia el servidor**: el volcado se verifica en
+     una base transitoria y una única transacción reemplaza todos los datos. Si falla
+     a mitad, PostgreSQL revierte todo y la base queda exactamente como estaba
+     (rollback automático; el intento queda `FALLIDA` en la bitácora `RestauracionBD`).
   3. Al completar se crea automáticamente un **snapshot pre-restauración**
      (`PRE_RESTAURACION`) y se abre una **ventana de 24 horas** para revertir.
   4. Para revertir dentro de la ventana: botón de reversión (restaura el snapshot
@@ -269,18 +277,20 @@ Permisos necesarios: `respaldo.gestionar` (Sistema → Respaldo).
 
 ```bash
 # Copia consistente EN CALIENTE (la base sigue operando):
-sqlite3 /home/cig-manufacturing/CIG-MANUFACTURING/db/production.db \
-  ".backup '/backups/cig-manufacturing-$(date +%F).db'"
+# (DATABASE_URL tomado del .env de la aplicación)
+pg_dump --format=custom \
+  --file=/backups/cig-manufacturing-$(date +%F).dump "$DATABASE_URL"
 
-# Copia EN FRÍO (servidor detenido): simplemente copiar el archivo
+# Restauración de emergencia EN FRÍO (servidor de la app detenido;
+# el clúster PostgreSQL puede seguir activo):
 sudo systemctl stop cig-manufacturing
-cp …/db/production.db /backups/cig-manufacturing-$(date +%F).db
+pg_restore --clean --if-exists --dbname="$DATABASE_URL" \
+  /backups/cig-manufacturing-AAAA-MM-DD.dump
 sudo systemctl start cig-manufacturing
 ```
 
-Restauración de emergencia en frío: detener el servicio, reemplazar
-`db/production.db` por el archivo de respaldo (conservando propietario
-`cig-manufacturing` y permisos) y arrancar de nuevo. Para operaciones normales,
+Restauración de emergencia: detener el servicio de la aplicación, aplicar el volcado
+con `pg_restore` y arrancar de nuevo. Para operaciones normales,
 **prefiera siempre la restauración en caliente del módulo**: es transaccional, audita
 el intento y deja punto de reversión.
 
@@ -293,8 +303,8 @@ el intento y deja punto de reversión.
 | `✖ Este script debe ejecutarse como root` | `sudo ./deploy.sh`. |
 | `✖ No se encontró package.json/prisma/seed.ts` | Ejecutar desde la raíz del repositorio clonado. |
 | Servicio `failed` / en bucle | `journalctl -u cig-manufacturing -n 50` y `tail -50 …/logs/stderr.log`. Causas típicas: `AUTH_SECRET` inválido, o `HOSTNAME`/`PORT` heredados en `.env` que rompen el bind (eliminar esas líneas). |
-| `PrismaClientInitializationError: Unable to open DB file` | `DATABASE_URL` relativa o sin permisos: usar ruta absoluta y verificar escritura del usuario de servicio en `db/`. |
-| `SQLITE_BUSY` / `database is locked` en `logs/stdout.log` | Contención por un proceso externo (p. ej. `sqlite3` CLI de mantenimiento). La app ya la absorbe en dos capas: espera interna de 5 s (`busy_timeout`, Fase 2) y re-ejecución con retroceso (Fase 3). Avisos `[bd] error transitorio en intento n/N` ocasionales = normal. Si son frecuentes: mover el mantenimiento pesado a horas sin operación o usar `VACUUM INTO`/`.backup` (nunca escrituras largas sobre el archivo en caliente). |
+| `PrismaClientKnownRequestError P1001` (no se puede alcanzar el servidor de BD) | `DATABASE_URL` incorrecta o PostgreSQL caído: verificar `systemctl is-active postgresql`, `pg_isready -h 127.0.0.1 -p 5432` y las credenciales del `.env`. |
+| `SQLSTATE 57P03` / `53300` (motor no disponible / demasiadas conexiones) | El servidor PostgreSQL se está reiniciando o está saturado. La app absorbe los transitorios con reintentos y retroceso exponencial (SQLSTATE `40001`/`40P01`/`57P03`/`53300`, ADR-006): avisos `[bd] error transitorio en intento n/N` ocasionales = normal. Si son frecuentes: `systemctl status postgresql`, `pg_isready -h 127.0.0.1 -p 5432` y `journalctl -u postgresql -n 50`. |
 | HTTPS no responde (dominio) | 1) ¿Registro A apunta a esta IP? 2) ¿El token tiene `Zone·DNS·Edit` sobre esa zona? Ver `journalctl -u caddy -n 50`. El primer certificado tarda 1-3 min. |
 | `caddy validate` falla con token vacío | Revisar `/etc/caddy/caddy.env` (debe existir en modo dominio con `CLOUDFLARE_API_TOKEN=…`). |
 | No se puede entrar tras desplegar en local | HTTP sin TLS: la cookie requiere `COOKIE_INSEGURA_HTTP=1` — el `.env` en modo local ya la incluye; si se desplegó antes con otro `.env`, agregarla y reiniciar. |
@@ -310,7 +320,9 @@ el intento y deja punto de reversión.
 Para desarrollo o evaluación sin `deploy.sh`, el repositorio incluye el flujo en un paso:
 
 ```bash
-./setup.sh     # genera .env (AUTH_SECRET aleatorio), instala, crea BD, siembra y compila
+./setup.sh     # requiere PostgreSQL 16+ local: genera .env (AUTH_SECRET aleatorio +
+               # DATABASE_URL + DATA_DIR), instala, aprovisiona rol y base, aplica
+               # migraciones, siembra y compila
 ./start.sh     # levanta el servidor standalone (puerto 3000; runtime bun con fallback node)
 ```
 
@@ -320,10 +332,19 @@ Para desarrollo o evaluación sin `deploy.sh`, el repositorio incluye el flujo e
 - `start.sh` valida `.env`, compilación, `DATABASE_URL` y `AUTH_SECRET` antes de
   arrancar, y fuerza `HOSTNAME=0.0.0.0` (`BIND_HOST=127.0.0.1` para solo local,
   `PORT=8080` para otro puerto).
-- Docker opcional: `docker compose up -d --build` con
-  `AUTH_SECRET="$(openssl rand -hex 32)"` (el compose se niega a arrancar sin él); BD
-  en volumen `cig-manufacturing-data`, contenedor sin privilegios (`cap_drop: ALL`,
-  `no-new-privileges`) y `HEALTHCHECK` sobre `GET /api`.
+- Docker opcional: `docker compose up -d --build` con `AUTH_SECRET` **y
+  `POSTGRES_PASSWORD`** obligatorios (el compose se niega a arrancar sin ellos:
+  `openssl rand -hex 32` y `openssl rand -hex 24`). El motor corre como servicio
+  `postgres:16-alpine` (volumen propio `cig-pg-data`, `healthcheck` con `pg_isready`,
+  sin puertos publicados al host); los archivos de la app (respaldos, branding)
+  viven en el volumen `cig-manufacturing-data` montado en `/data` (`DATA_DIR`).
+  El contenedor de la app corre sin privilegios (`cap_drop: ALL`,
+  `no-new-privileges`) y con `HEALTHCHECK` sobre `GET /api`.
+
+- **Actualizaciones desde la v1.1.1** (instalaciones con el motor de archivo
+  anterior): seguir la guía de migración de
+  [README-DEPLOY.md §8](./README-DEPLOY.md#8-migración-de-una-instalación-desde-v111-sqlite)
+  (script auditable `scripts/migrar-sqlite-a-postgres.ts`).
 
 Detalles de Docker y del entorno de desarrollo (incluidas las pruebas E2E de
 `scripts/`) en el `README.md` del repositorio y en

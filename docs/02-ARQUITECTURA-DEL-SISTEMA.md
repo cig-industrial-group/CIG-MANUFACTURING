@@ -1,6 +1,6 @@
 # 02 — Arquitectura del Sistema
 
-> **Proyecto:** CIG-MANUFACTURING · **Versión documentada:** 1.1.1 · **Rama:** `main`
+> **Proyecto:** CIG-MANUFACTURING · **Versión documentada:** 2.0.0 · **Rama:** `main`
 > Suite de documentación arquitectónica — Parte 2 de 6.
 
 ---
@@ -29,11 +29,11 @@ Ruta API — src/app/api/**/route.ts
 Lógica del módulo — src/modulos/<modulo>/servicios/nucleo.ts
   │  reglas de negocio, folios, snapshots, bitácoras, transacciones
   ▼
-Transacciones con reintentos — src/lib/reintentos.ts (Fase 3)
+Transacciones con reintentos — src/lib/reintentos.ts (SQLSTATE, ADR-006)
   ▼
-Prisma Client (singleton + WAL/pool=1/busy_timeout) — src/lib/db.ts
+Prisma Client (singleton, pool nativo) — src/lib/db.ts
   ▼
-SQLite (archivo único) — DATABASE_URL (db/custom.db o db/production.db)
+PostgreSQL 16 — DATABASE_URL (postgresql://usuario:clave@host:5432/base)
 ```
 
 **Precisión obligatoria:** este proyecto **no** usa `middleware.ts` de Next.js. La capa de
@@ -94,7 +94,7 @@ CIG-MANUFACTURING/
 ├── prisma/
 │   ├── schema.prisma              # FUENTE ÚNICA del modelo de datos (21 modelos)
 │   └── seed.ts                    # Semilla idempotente: roles, configuración, admin inicial
-├── db/                            # Base de datos SQLite + db/backups/ (estado de producción)
+├── db/                            # DATA_DIR: respaldos .dump, branding y credenciales (la BD vive en PostgreSQL)
 ├── src/
 │   ├── app/                       # App Router de Next.js
 │   │   ├── layout.tsx             # Raíz, fuentes y estilos
@@ -134,7 +134,7 @@ CIG-MANUFACTURING/
 │   │   └── compartidos/           #   ui/ (componentes del dominio), idioma/, errores.ts
 │   ├── components/ui/             # Componentes shadcn/ui (vocabulario UI base)
 │   ├── hooks/                     # use-toast, use-mobile
-│   ├── lib/                       # db.ts (Prisma singleton, endurecimiento Fase 2),
+│   ├── lib/                       # db.ts (cliente Prisma singleton),
 │   │                              # reintentos.ts (Fase 3), numerico.ts (Decimal, Fase 1),
 │   │                              # utils.ts (cn)
 │   └── instrumentation.ts         # Validación de AUTH_SECRET AL ARRANQUE (fail-secure)
@@ -143,12 +143,11 @@ CIG-MANUFACTURING/
 │   ├── permiso-*.ts               #   migraciones puntuales de permisos (catalogo, clientes,
 │   │                              #   correccion, oqc, respaldo, unidades)
 │   ├── migrar-papelera.ts         #   backfill de snapshots del histórico
-│   ├── simulacion-ci.sh           #   réplica local del pipeline de CI (9 pasos)
+│   ├── migrar-sqlite-a-postgres.ts #  migración de datos v1.1.1 → PostgreSQL (auditable)
+│   ├── prueba-humo-*.ts           #   pruebas de humo (Fases 1/4/5 + PostgreSQL end-to-end)
+│   ├── simulacion-ci.sh           #   réplica local del pipeline de CI (9 pasos, BD efímera)
 │   ├── test-clientes.py           #   E2E del módulo Clientes (patrón de pruebas)
-│   ├── test-oqc-fix.py            #   E2E correcciones OQC
-│   ├── test-oqc-sync.py           #   E2E sincronización cabecera/partidas OQC
-│   ├── test-respaldo.py           #   E2E respaldo/restauración
-│   ├── test-unidades.py           #   E2E unidades y conteo en paquetes
+│   ├── test-branding.py           #   E2E del módulo Branding
 │   ├── test-borrado.sh            #   E2E borrado en niveles
 │   ├── validar-auth-secret.sh     #   validador de secreto compartido por los scripts de arranque
 │   ├── posbuild.mjs               #   copia static/ y public/ al standalone
@@ -159,7 +158,7 @@ CIG-MANUFACTURING/
 ├── start.sh                       # Arranque del standalone (bun/node) con validaciones
 ├── Dockerfile · docker-compose.yml· Caddyfile   # Despliegue Docker opcional y proxy de referencia
 ├── next.config.ts                 # output: "standalone"
-├── DESPLIEGUE.md                  # ⚠️ DEPRECADO — ver docs/05
+├── CHANGELOG.md                   # Registro de cambios (Keep a Changelog)
 └── README-DEPLOY.md               # Guía detallada de deploy.sh (mantiene vigencia)
 ```
 

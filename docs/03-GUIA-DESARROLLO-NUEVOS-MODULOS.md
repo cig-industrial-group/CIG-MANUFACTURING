@@ -1,6 +1,6 @@
 # 03 — Guía de Desarrollo: Nuevos Módulos
 
-> **Proyecto:** CIG-MANUFACTURING · **Versión documentada:** 1.1.1 · **Rama:** `main`
+> **Proyecto:** CIG-MANUFACTURING · **Versión documentada:** 2.0.0 · **Rama:** `main`
 > Suite de documentación arquitectónica — Parte 3 de 6.
 >
 > **Ejemplo maestro:** módulo **Proveedores** (catálogo de proveedores de materia prima).
@@ -32,7 +32,7 @@
 Orden obligatorio de integración (cada paso depende del anterior):
 
 ```
-1. Base de datos (schema.prisma → db push)
+1. Base de datos (schema.prisma → migración versionada)
 2. Permisos (seed.ts + permisos.ts + migración puntual)
 3. API (src/app/api/proveedores/)
 4. Lógica de negocio (src/modulos/proveedores/servicios/)
@@ -80,21 +80,22 @@ entidad de negocio.
 
 ### 1.2 Aplicar el esquema y regenerar el cliente
 
-Este proyecto usa `prisma db push` (sin historial de migraciones versionadas). Desde la
-raíz del repositorio:
+Este proyecto aplica el esquema por **migraciones versionadas y auditables** (cada
+migración queda registrada en `_prisma_migrations`). Desde la raíz del repositorio:
 
 ```bash
-bunx prisma db push            # aplica el esquema a la BD de DATABASE_URL
-bunx prisma generate           # regenera PrismaClient (db:generate en package.json)
+bunx prisma migrate dev --name <modulo>   # crea y aplica la migración (desarrollo)
+bunx prisma generate                      # regenera PrismaClient (db:generate en package.json)
 ```
 
-`package.json` define los atajos `db:push` y `db:generate` (`bun run db:push`,
-`bun run db:generate`). `deploy.sh` en producción ya ejecuta
-`bunx prisma db push --skip-generate` seguido de `bunx prisma db seed` en cada
-re-ejecución, por lo que desplegar la versión nueva aplica el esquema sin pasos extra.
+`package.json` define los atajos `db:migrate`, `db:generate` y `db:reset`. En
+producción, `deploy.sh` y `setup.sh` ejecutan `bunx prisma migrate deploy` seguido de
+`bunx prisma db seed` en cada re-ejecución (aplica solo las migraciones pendientes, de
+forma idempotente), por lo que desplegar la versión nueva aplica el esquema sin pasos
+extra.
 
 > **Verificación inmediata:** `bunx prisma studio` o
-> `sqlite3 db/custom.db ".schema Proveedor"` deben mostrar la tabla nueva.
+> `psql "$DATABASE_URL" -c '\dt'` deben mostrar la tabla nueva.
 
 ---
 
@@ -847,7 +848,7 @@ bash scripts/simulacion-ci.sh
 
 ## 7. Lista de verificación final de integración
 
-- [ ] `prisma/schema.prisma` tiene el modelo `Proveedor` y `bunx prisma db push` aplicó sin error.
+- [ ] `prisma/schema.prisma` tiene el modelo `Proveedor` y `bunx prisma migrate dev` creó/aplicó la migración sin error.
 - [ ] `prisma/seed.ts` incluye `proveedores.ver`/`proveedores.gestionar` en `PERMISOS` y en los roles objetivo; `ADMIN`/`TI` heredan por `TODOS`.
 - [ ] `src/modulos/autenticacion/permisos.ts` tiene las claves en `PERMISOS` **y** el grupo en `PERMISOS_AGRUPADOS`.
 - [ ] `scripts/permiso-proveedores.ts` existe, es idempotente y se documenta en la guía de actualización.

@@ -233,3 +233,131 @@ Barrido automático sobre el contenido del paquete antes de comprimir:
 ---
 
 *Evidencia generada automáticamente por la batería de validación final de la Fase 6.*
+
+---
+
+# AUDITORIA_EVIDENCIA — Entrega de versión 2.0.0 (post-migración)
+
+## CIG-MANUFACTURING v2.0.0
+
+**Fecha de la captura:** 2026-11-07 · **Tarea:** ACTUALIZACIÓN DE VERSIÓN, CHANGELOG Y
+DOCUMENTACIÓN (Post-Migración). **Alcance declarado:** exclusivamente archivos de
+versión, documentación y metadatos — **cero cambios de lógica de negocio o código de
+la aplicación** (`src/` permanece byte a byte idéntico al entregable auditado de la
+migración).
+
+## A. Decisión de versión — incremento MAYOR 2.0.0 (SemVer 2.0.0)
+
+Se seleccionó **2.0.0** (no 1.2.0) porque el cambio de requisito de despliegue es un
+**Breaking Change para el usuario final**, conforme a SemVer 2.0.0 §7–§8:
+
+1. **PostgreSQL 16 pasa a ser requisito obligatorio**: una instalación v1.1.1 no puede
+   actualizar en el lugar sin instalar y operar un servidor de base de datos externo.
+2. **Variables de entorno obligatorias nuevas**: `DATABASE_URL` de PostgreSQL y
+   `DATA_DIR` (y `POSTGRES_PASSWORD` en Docker).
+3. **Migración de datos obligatoria** (`scripts/migrar-sqlite-a-postgres.ts`) para
+   conservar los datos de la v1.1.1.
+4. **Se elimina el soporte de SQLite como motor** (documentado en `Removed` del
+   CHANGELOG): una remoción de la interfaz de despliegue no puede versionarse como
+   Minor.
+
+La justificación completa viaja en el cuerpo del commit de release, en el preámbulo
+del `CHANGELOG.md` y en el **ADR-009** (que reemplaza al ADR-001).
+
+## B. Archivos modificados, creados y retirados
+
+| Acción | Archivo | Detalle |
+|---|---|---|
+| Modificado | `package.json` | `version` 1.1.1 → **2.0.0** |
+| Creado | `CHANGELOG.md` | Estándar Keep a Changelog 1.1.0; sección `[2.0.0] - 2026-11-07`; categorías Added / Changed / Fixed / Security / Removed; enlace de comparación v1.1.1…v2.0.0 |
+| Modificado | `README.md` | Versión 2.0.0, pila tecnológica (PostgreSQL 16+), sección Respaldo (pg_dump/pg_restore), estructura (`DATA_DIR`), requisitos de `setup.sh`, **Guía de Migración desde v1.1.1** (única sección con SQLite) |
+| Modificado | `README-DEPLOY.md` | Nota de motor obligatorio (PGDG/systemd/variables de entorno), §8 formalizada como «Migración de una instalación desde v1.1.1 (SQLite)» con el comando directo `bun run scripts/migrar-sqlite-a-postgres.ts` |
+| Modificado | `docs/01–06` | «Versión documentada» → 2.0.0; motor PostgreSQL 16+ (docs/01, 04); diagrama de flujo y árbol de directorios (docs/02); `prisma migrate deploy` (docs/01, 03, 04); §4 respaldo con pg_dump y solución de problemas por SQLSTATE/P1001 (docs/05); Docker con `POSTGRES_PASSWORD`/`DATA_DIR` (docs/05 §6) |
+| Modificado | `docs/06 (ADR)` | **ADR-009 nuevo** (migración del motor, reemplaza ADR-001); ADR-001 → estado «Reemplazado»; nota de actualización v2.0.0 (SQLSTATE) en ADR-006; índice actualizado |
+| Modificado | `deploy.sh` | Banners de versión (líneas de comentario y salida de consola) v1.1.1 → v2.0.0 — metadato de versión, sin cambio de lógica |
+| Modificado | `scripts/empaquetar.sh` | Comentario de versión v1.1.1 → v2.0.0 — metadato, sin cambio de lógica |
+| Retirado | `DESPLIEGUE.md` | Guía de despliegue **deprecada** de la era SQLite (ya reemplazada por docs/05 + README-DEPLOY.md; su contenido instruía respaldos `sqlite3` y URLs `file:`) |
+| Retirados | `scripts/test-respaldo.py`, `scripts/test-oqc-fix.py`, `scripts/test-oqc-sync.py`, `scripts/test-unidades.py`, `scripts/verificar-upgrade.ts` | **Scripts de prueba muertos de la era SQLite** (verificación directa por `sqlite3`/URL `file:` — inservibles bajo PostgreSQL). Retirada exigida por la entrada `Removed` del CHANGELOG; verificado que nada los invoca (`simulacion-ci.sh`, CI, README y docs no los referencian). Sin efecto funcional; recuperables desde el historial Git |
+
+## C. Verificaciones ejecutadas (criterios de aceptación)
+
+```text
+1) Sin regresión de la migración (criterio original de la Fase 6):
+   rg -i "sqlite|vacuum|journal_mode|busy_timeout" src/ docker-compose.yml Dockerfile setup.sh deploy.sh
+   → 0 coincidencias (código de salida 1)
+
+2) Documentación de despliegue sin SQLite como opción nueva:
+   README.md / README-DEPLOY.md / docs/01–05 → las únicas coincidencias de "sqlite"
+   son (a) la Guía de Migración desde v1.1.1 y su enlace en el índice (permitidas
+   expresamente) y (b) el nombre de archivo del script de migración
+   (scripts/migrar-sqlite-a-postgres.ts). docs/06 (ADR) y PROCEDENCIA conservan sus
+   referencias como registros históricos de decisiones.
+
+3) Versión:
+   package.json → 2.0.0 · docs/01–06 → "Versión documentada: 2.0.0" ·
+   banners de deploy.sh y scripts/empaquetar.sh → v2.0.0.
+   Las referencias "1.1.1" restantes son legítimas: guía de migración,
+   registros históricos ADR y la dependencia "cmdk": "^1.1.1" (paquete npm,
+   no la versión del proyecto).
+
+4) CHANGELOG.md: existe en la raíz, formato Keep a Changelog, sección
+   [2.0.0] - 2026-11-07, con las categorías Added/Changed/Fixed/Removed exigidas
+   más Security, y detalla los hallazgos de seguridad corregidos (fuga de
+   AUTH_SECRET en CI/CD, PGPASSWORD vía env, --no-password, sanitización de URLs).
+```
+
+## D. Release Git (estado del repositorio entregado)
+
+El paquete incluye el repositorio Git (`.git`) con la historia mínima auditable:
+
+1. **Commit base** — importa el estado auditado de la migración (entregable
+   v1.1.1-postgresql, idéntico al paquete validado en la Fase 6).
+2. **Commit de release** — `chore(release): bump version to 2.0.0, update changelog
+   and deployment docs for PostgreSQL migration`, con la justificación SemVer en el
+   cuerpo. El diff entre ambos commits documenta EXACTAMENTE el alcance de esta tarea.
+
+El hash exacto del HEAD se consulta con `git log -1 --format=%H`.
+
+**Comandos que el AUDITOR debe ejecutar para publicar el release** (no ejecutados por
+el agente, conforme a la instrucción):
+
+```bash
+# 0) Verificar el estado entregado
+git log --oneline -5          # debe mostrar el commit de release como HEAD de main
+git status                    # árbol de trabajo limpio
+
+# 1) Crear el tag anotado del release
+git tag -a v2.0.0 -m "v2.0.0 — Migración del motor de base de datos a PostgreSQL 16 (breaking change de despliegue, ADR-009)"
+
+# 2) Publicar la rama y el tag
+git push origin main
+git push origin v2.0.0
+
+# 3) (Opcional, GitHub) crear el Release con las notas del changelog
+gh release create v2.0.0 --title "v2.0.0 — Migración a PostgreSQL 16" \
+  --notes-file CHANGELOG.md
+```
+
+## E. Escaneo de seguridad previo al empaquetado (v2.0.0)
+
+Barrido repetido sobre el paquete final (sin regresión respecto de la Fase 6):
+
+- **`AUTH_SECRET` con valor literal:** 0 coincidencias.
+- **Cadenas de conexión con credenciales:** solo placeholders de documentación
+  (`usuario:clave@host`, `CONTRASENA` en `.env.example`), variables de entorno/runtime
+  (`${POSTGRES_PASSWORD}`, `${CLAVE_BD}`, generadas con `openssl rand` en
+  `setup.sh`/`deploy.sh`/`simulacion-ci.sh`) y la credencial efímera del contenedor de
+  CI (`cig_ci` en `.github/workflows/ci.yml`, localhost, destruido al terminar el job
+  — evaluada y aceptada en la auditoría de la Fase 6; no protege nada real).
+- **Credenciales históricas/secretos de desarrollo:** solo presentes en las **listas
+  negras** que los RECHAZAN (`seguridad.ts`, `validar-auth-secret.sh`, `deploy.sh`) y
+  en documentación que describe el bloqueo — por diseño.
+- **Tokens de API:** únicamente placeholders de documentación (`CF_API_TOKEN=xxxxx`).
+- **Exclusiones del paquete:** `.env`, `db/`, `node_modules/`, `.next/`, `*.log`
+  (respetadas por `.gitignore` y por el empaquetado).
+
+**Resultado: APTO PARA EMPAQUETAR.**
+
+---
+
+*Evidencia de la entrega de versión 2.0.0 — tarea adicional post-migración (versión, changelog y documentación).*

@@ -5,6 +5,16 @@ extremo: transforma un servidor virgen en un entorno de producción seguro y
 operativo en menos de 5 minutos (más el tiempo de `apt upgrade` y, con dominio,
 el de compilar Caddy con Go).
 
+> **Motor de datos obligatorio: PostgreSQL 16.** El instalador lo aprovisiona de forma
+> idempotente desde el repositorio oficial PGDG (paso 6), junto con el cliente que
+> exige el módulo de Respaldo (`postgresql-client-16`: `pg_dump`/`pg_restore`/`psql`)
+> y la dependencia de servicio `After/Wants=postgresql.service` (paso 11). Variables
+> de entorno obligatorias: `DATABASE_URL` de PostgreSQL, `DATA_DIR` y `AUTH_SECRET`
+> (generadas por el paso 9; ver [`.env.example`](./.env.example)); en el despliegue
+> Docker se añade `POSTGRES_PASSWORD` (ver `docker-compose.yml` y
+> [docs/05 §6](./docs/05-DESPLIEGUE-Y-OPERACION.md)). Si actualizas desde la v1.1.1,
+> sigue la [guía de migración §8](#8-migración-de-una-instalación-desde-v111-sqlite).
+
 ---
 
 ## Tabla de contenidos
@@ -16,7 +26,7 @@ el de compilar Caddy con Go).
 5. [Verificación post-instalación (criterios de aceptación)](#5-verificación-post-instalación-criterios-de-aceptación)
 6. [Decisiones técnicas y desviaciones documentadas](#6-decisiones-técnicas-y-desviaciones-documentadas)
 7. [Re-ejecución, actualizaciones e idempotencia](#7-re-ejecución-actualizaciones-e-idempotencia)
-8. [Migración de una instalación del motor anterior](#8-migración-de-una-instalación-del-motor-anterior)
+8. [Migración de una instalación desde v1.1.1 (SQLite)](#8-migración-de-una-instalación-desde-v111-sqlite)
 9. [Operación: logs, respaldos y mantenimiento](#9-operación-logs-respaldos-y-mantenimiento)
 10. [Solución de problemas](#10-solución-de-problemas)
 11. [Limitaciones y supuestos](#11-limitaciones-y-supuestos)
@@ -260,11 +270,11 @@ git pull origin main
 sudo ./deploy.sh        # recompila y reinicia; conserva datos
 ```
 
-## 8. Migración de una instalación del motor anterior
+## 8. Migración de una instalación desde v1.1.1 (SQLite)
 
-Si vienes de una instalación con el motor de archivo anterior (un `production.db`),
-la migración de DATOS es un paso explícito y auditable — nunca se hace en
-silencio ni se fusiona:
+Si actualizas desde la **v1.1.1** — cuyo motor era SQLite embebido (un
+`production.db`) —, la migración de DATOS es un paso explícito y auditable: nunca
+se hace en silencio ni se fusiona:
 
 ```bash
 # 1) Despliega normalmente (crea PostgreSQL, el rol y la base, aplica
@@ -277,6 +287,13 @@ sudo runuser -u cig-manufacturing -- \
   /home/cig-manufacturing/.bun/bin/bun \
   /home/cig-manufacturing/CIG-MANUFACTURING/scripts/migrar-sqlite-a-postgres.ts \
   /ruta/a/production.db
+```
+
+En entornos de desarrollo/evaluación (con PostgreSQL 16 local ya aprovisionado por
+`setup.sh`), el comando directo equivalente es:
+
+```bash
+bun run scripts/migrar-sqlite-a-postgres.ts /ruta/a/production.db
 ```
 
 El script:

@@ -3,7 +3,7 @@
 > ⚖️ **AVISO LEGAL:** Copyright © 2026 Emmanuel Caballero De La Rosa. Todos los derechos reservados.  
 > Tijuana, Baja California, México. Este proyecto es propiedad privada y confidencial. Queda prohibida su reproducción, distribución o uso no autorizado sin permiso explícito por escrito.
 
-**Versión:** 1.1.1 — incluye el módulo de Branding (Identidad Visual) en Ajustes, la suite de documentación de `/docs/` y el endurecimiento de seguridad de las Fases 1–5 (reintentos, observabilidad, respuestas de error, sesiones y cookies, y auditoría de cadena de suministro en el build).
+**Versión:** 2.0.0 — migración del motor de base de datos a **PostgreSQL 16** (requisito obligatorio; decisión ADR-009). Registro de cambios: [CHANGELOG.md](./CHANGELOG.md). Si actualizas desde la v1.1.1, sigue la [Guía de Migración](#guía-de-migración-desde-v111-sqlite).
 
 Sistema web bilingüe (Español / Inglés) para el control y la gestión de almacén de fábrica:
 inventario multi-almacén, entradas, recepción de materia prima, salidas, traslados, ajustes,
@@ -28,7 +28,7 @@ usuarios, roles y permisos.
 | **OQC (Calidad de Salida)** | Liberación de material a clientes: toda la operación se agrupa bajo **un folio de salida único** (OQC-…) con una partida (movimiento SALIDA) por producto. El inspector puede **corregir una partida individual** (la remisión/PL y el responsable siempre reflejan la cabecera de la salida) o **eliminarla** (devuelve el material con bitácora), **editar la cabecera** de la salida — la remisión y el responsable se propagan a todas las partidas y quedan en la bitácora como «Edición de cabecera» — y **eliminar la salida completa** (revierte todo el stock, con bitácora por partida). La bitácora se liga a la salida por `salidaId` (clave estable): las correcciones de partidas eliminadas siguen siendo visibles y una liberación nueva jamás hereda correcciones ajenas. Registro de **scrap** (descuenta stock mediante movimiento SCRAP con el mismo folio, corregible/eliminable con bitácora) y de **rechazos** de inspección (documental, sin efecto en stock, con disposición: pendiente/retrabajo/scrap/liberado). |
 | **Usuarios y roles** | 6 roles precargados (ADMIN, TI, JEFE_ALMACEN, ALMACENERO, OPERADOR, OQC) con permisos granulares editables desde la app. |
 | **Ajustes** | Habilitar/deshabilitar registro público y recuperación de contraseña; rol asignado al autoregistro. |
-| **Respaldo y Restauración** | Copias de seguridad completas de la base de datos (instantánea consistente con `VACUUM INTO`, sin detener la planta) y **restauración EN CALIENTE**: una única transacción reemplaza todos los datos sin reiniciar el servidor. Si la restauración falla a mitad de operación, SQLite revierte todo y la base queda **exactamente como estaba** (rollback automático). Cada restauración exitosa crea un **snapshot pre-restauración** y abre una **ventana de 24 horas** para revertirla desde la UI (la reversión es a su vez una restauración con su propia ventana). Incluye respaldo **automático diario** (al abrir el módulo, conserva los últimos 7), rotación/limpieza de snapshots, detección de archivos copiados manualmente a `db/backups/`, descarga de respaldos, validación de integridad y compatibilidad de esquema antes de restaurar, y bitácora completa de intentos (`RestauracionBD`). |
+| **Respaldo y Restauración** | Copias de seguridad completas de la base de datos (`pg_dump --format=custom`: instantánea consistente sin detener la planta) y **restauración EN CALIENTE**: una única transacción reemplaza todos los datos sin reiniciar el servidor. Si la restauración falla a mitad de operación, PostgreSQL revierte todo y la base queda **exactamente como estaba** (rollback automático). Cada restauración exitosa crea un **snapshot pre-restauración** y abre una **ventana de 24 horas** para revertirla desde la UI (la reversión es a su vez una restauración con su propia ventana). Incluye respaldo **automático diario** (al abrir el módulo, conserva los últimos 7), rotación/limpieza de snapshots, detección de archivos copiados manualmente a `DATA_DIR/backups/`, descarga de respaldos, validación de integridad y compatibilidad de esquema del volcado (`pg_restore --list`) antes de restaurar, y bitácora completa de intentos (`RestauracionBD`). |
 | **Bilingüe** | Interfaz completa ES/EN con selector de idioma. |
 
 ## Permisos del sistema
@@ -47,7 +47,7 @@ fijada en el repositorio**:
 - Si ejecutas la instalación con `ADMIN_PASSWORD='TuClave123' ./setup.sh`, esa es la
   contraseña inicial del administrador.
 - Si no la defines, se genera una **aleatoria** y queda escrita (una sola vez,
-  permisos 600) en `db/credenciales-iniciales.txt`.
+  permisos 600) en `DATA_DIR/credenciales-iniciales.txt`.
 
 > ⚠️ **Cambia la contraseña en el primer inicio de sesión** (el sistema te lo
 > pedirá) y elimina `credenciales-iniciales.txt` después. Las cuentas adicionales
@@ -57,7 +57,7 @@ fijada en el repositorio**:
 ## Pila tecnológica
 
 - **Next.js 16** (App Router, salida `standalone`) + **React 19** + **TypeScript**
-- **Prisma ORM** con **SQLite** (archivo único, sin servidor de BD externo)
+- **Prisma ORM** con **PostgreSQL 16+** (servidor de base de datos obligatorio; `deploy.sh`, `setup.sh` y `docker-compose.yml` lo aprovisionan)
 - **Tailwind CSS 4** + componentes **shadcn/ui**
 - **jose** (JWT) + **bcryptjs** (hash de contraseñas)
 - **React Query**, **React Table**, **Recharts**, **react-qr-code**
@@ -69,8 +69,8 @@ cig-manufacturing/
 ├── prisma/
 │   ├── schema.prisma        # Modelo de datos (21 modelos)
 │   └── seed.ts              # Semilla: roles, configuración y admin inicial
-├── db/
-│   └── custom.db            # Base de datos SQLite (se crea con setup.sh)
+├── db/                      # DATA_DIR por omisión: respaldos, branding y credenciales
+│   └── backups/             #   volcados pg_dump (.dump); la BD vive en el servidor PostgreSQL
 ├── src/
 │   ├── app/                 # Páginas y rutas API (App Router)
 │   │   └── api/             # auth/, usuarios/, roles/, almacen/, ajustes/
@@ -97,8 +97,12 @@ cig-manufacturing/
 
 ## Inicio rápido
 
+> **Requisito obligatorio:** PostgreSQL 16+ accesible en local. `setup.sh` aprovisiona
+> el rol y la base de datos (si no puede, escribe `instrucciones-postgres.txt` con el
+> SQL exacto para ejecutar como administrador).
+
 ```bash
-./setup.sh     # configura .env (AUTH_SECRET aleatorio), instala, crea BD, siembra y compila
+./setup.sh     # configura .env (AUTH_SECRET aleatorio + DATABASE_URL + DATA_DIR), instala, crea BD, siembra y compila
 ./start.sh     # levanta el servidor en producción (puerto 3000)
 ```
 
@@ -143,7 +147,7 @@ ADMIN_PASSWORD='...' python3 scripts/test-clientes.py   # E2E del módulo Client
 
 ## Modelo de datos (resumen)
 
-La base de datos es un único archivo SQLite con **21 modelos** definidos en
+La base de datos vive en un **servidor PostgreSQL 16** y tiene **21 modelos** definidos en
 [`prisma/schema.prisma`](./prisma/schema.prisma): autenticación (`Rol`, `Usuario`,
 `Restablecimiento`, `Configuracion`), almacén (`Almacen`, `Producto`, `Stock`,
 `Movimiento`, `CorreccionMovimiento`, `SecuenciaFolio`), unidades (`UnidadMedida`),
@@ -155,6 +159,35 @@ calidad de salida (`SalidaOQC`, `RegistroScrap`, `RegistroRechazo`), papelera
 especiales (folios monotónicos, papelera de 3 niveles, snapshots inmutables,
 restauración en caliente) — está en
 **[docs/04-REFERENCIA-BASE-DATOS.md](./docs/04-REFERENCIA-BASE-DATOS.md)**.
+
+## Guía de Migración desde v1.1.1 (SQLite)
+
+> Esta es la **única sección** de la documentación vigente que referencia el motor
+> anterior: la serie 1.x usaba SQLite embebido; desde la 2.0.0 el requisito
+> obligatorio es **PostgreSQL 16+** (ADR-009).
+
+Si actualizas una instalación existente de la v1.1.1:
+
+1. Instala y arranca **PostgreSQL 16** (en despliegues con `deploy.sh` el propio
+   instalador lo aprovisiona desde PGDG; con Docker, usa el servicio
+   `postgres:16-alpine` del `docker-compose.yml`).
+2. Despliega la v2.0.0: `deploy.sh` crea rol, base y esquema (migraciones
+   auditables) y conserva tu `.env` en re-ejecuciones.
+3. Migra los datos del archivo de la instalación anterior:
+
+   ```bash
+   bun run scripts/migrar-sqlite-a-postgres.ts /ruta/a/production.db
+   ```
+
+   La copia es **transaccional y verificada** (21 tablas, conteos por tabla, cero
+   discrepancias o aborta) y conserva folios monotónicos, papelera con su ventana
+   de 30 días, snapshots del histórico y bitácoras.
+
+4. Verifica el resultado con la prueba de humo:
+   `bun run scripts/prueba-humo-postgres.ts`.
+
+La guía operativa completa para instalaciones de producción está en
+[README-DEPLOY.md § 8](./README-DEPLOY.md#8-migración-de-una-instalación-desde-v111-sqlite).
 
 ## Licencia
 

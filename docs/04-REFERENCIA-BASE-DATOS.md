@@ -1,9 +1,9 @@
 # 04 — Referencia de Base de Datos
 
-> **Proyecto:** CIG-MANUFACTURING · **Versión documentada:** 1.1.1 · **Rama:** `main`
+> **Proyecto:** CIG-MANUFACTURING · **Versión documentada:** 2.0.0 · **Rama:** `main`
 > Suite de documentación arquitectónica — Parte 4 de 6.
 >
-> Fuente única de verdad: `prisma/schema.prisma` (motor **SQLite**, generador
+> Fuente única de verdad: `prisma/schema.prisma` (motor **PostgreSQL 16**, generador
 > `prisma-client-js`, URL por `DATABASE_URL`). Este documento es un espejo del esquema;
 > ante cualquier discrepancia, el esquema manda y este documento debe corregirse.
 
@@ -11,8 +11,10 @@
 
 ## 0. Generalidades
 
-- **Motor:** SQLite (archivo único). Instalaciones `setup.sh`: `db/custom.db`;
-  despliegues `deploy.sh`: `/home/cig-manufacturing/CIG-MANUFACTURING/db/production.db`.
+- **Motor:** **PostgreSQL 16+** (requisito obligatorio; ADR-009), direccionado por
+  `DATABASE_URL` (`postgresql://…`). `deploy.sh` lo instala desde PGDG y aprovisiona
+  rol y base; `setup.sh` hace lo propio en local; Docker usa el servicio
+  `postgres:16-alpine` (volumen `cig-pg-data`).
 - **Identificadores:** `cuid()` por omisión; `createdAt`/`updatedAt` automáticos.
 - **Convención del sistema:** la auditoría y el histórico **no usan FK duras** hacia
   entidades de negocio. `Movimiento`, `CorreccionMovimiento`, `Papelera`, `SalidaOQC`,
@@ -38,7 +40,7 @@
 ### Comandos de esquema
 
 ```bash
-bunx prisma db push        # aplica el esquema a la BD (atajo: bun run db:push)
+bunx prisma migrate deploy # aplica las migraciones a la BD (en desarrollo: bun run db:migrate)
 bunx prisma generate       # regenera el cliente (atajo: bun run db:generate)
 bunx prisma db seed        # semilla (package.json → bun prisma/seed.ts)
 bunx prisma studio         # explorador visual (solo desarrollo)
@@ -353,14 +355,15 @@ describe el mundo **tal como era**, no tal como es ahora.
 
 ### 8.4 Respaldo y restauración en caliente (módulo Respaldo)
 
-- **Respaldo:** instantánea consistente con `VACUUM INTO` (SQL directo sobre el archivo)
-  hacia `db/backups/`, sin detener la planta. Registro en `RespaldoBD` con `tipo`
+- **Respaldo:** instantánea consistente con `pg_dump --format=custom` (volcado comprimido
+  del servidor, restaurable con `pg_restore`) hacia `DATA_DIR/backups/`, sin detener la
+  planta. Registro en `RespaldoBD` con `tipo`
   `MANUAL` · `AUTOMATICO` (diario al abrir el módulo, conserva los últimos 7) ·
   `PRE_RESTAURACION` · `DETECTADO` (copiado a mano a la carpeta) · `SUBIDO`.
-- **Restauración en caliente:** una única transacción (`db.$transaction`) borra e
-  inserta todas las tablas en orden seguro. Si falla a mitad, SQLite revierte TODO: la
-  base queda intacta. Antes de restaurar se valida integridad (`PRAGMA quick_check`) y
-  compatibilidad de esquema del archivo.
+- **Restauración en caliente:** el volcado se verifica primero (integridad con
+  `pg_restore --list` y compatibilidad de esquema) y luego una única transacción
+  (`db.$transaction`) borra e inserta todas las tablas en orden seguro. Si falla a
+  mitad, PostgreSQL revierte TODO: la base queda intacta.
 - **Ventana de reversión de 24 h:** cada restauración exitosa crea un snapshot
   pre-restauración y queda registrada en `RestauracionBD`
   (`estado: COMPLETADA`, `ventanaReversaHasta = completadaEn + 24 h`); revertir es a su
