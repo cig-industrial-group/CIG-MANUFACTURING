@@ -143,6 +143,13 @@ Detalle de coberturas clave:
 | `scripts/validar-docs-suite.py` | **Nuevo (herramienta de auditoría)** — re-ejecutable: `python3 scripts/validar-docs-suite.py <raíz-del-repo>` |
 | `DIFF-fase13.patch` | Diff completo de los archivos modificados (los docs nuevos son archivos completos) |
 
+> **Nota de reorganización (post-entrega):** los parches `DIFF-fase*.patch`
+> citados como entregables de esta fase se retiraron de la raíz del
+> repositorio durante la reorganización de higiene del proyecto; los cambios
+> que documentan ya están integrados en el árbol de código y registrados en
+> `CHANGELOG.md`. Este informe conserva las menciones como registro histórico
+> de la entrega.
+
 ---
 
 ## 6. Cómo re-ejecutar la validación

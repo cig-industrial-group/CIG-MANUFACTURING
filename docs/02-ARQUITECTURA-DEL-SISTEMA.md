@@ -153,10 +153,13 @@ CIG-MANUFACTURING/
 │   ├── posbuild.mjs               #   copia static/ y public/ al standalone
 │   └── empaquetar.sh              #   empaquetado de distribución
 ├── docs/                          # ESTA suite de documentación
+│   └── compliance/                #   evidencia de auditoría e informes de validación
+├── infra/caddy/Caddyfile          # Plantilla de referencia del proxy inverso (Caddy);
+│                                  #   deploy.sh genera el Caddyfile real en /etc/caddy/
 ├── deploy.sh                      # Instalador de producción (Ubuntu 22.04, endurecido)
 ├── setup.sh                       # Instalación local completa en un paso
 ├── start.sh                       # Arranque del standalone (bun/node) con validaciones
-├── Dockerfile · docker-compose.yml· Caddyfile   # Despliegue Docker opcional y proxy de referencia
+├── Dockerfile · docker-compose.yml  # Despliegue Docker opcional
 ├── next.config.ts                 # output: "standalone"
 ├── CHANGELOG.md                   # Registro de cambios (Keep a Changelog)
 └── README-DEPLOY.md               # Guía detallada de deploy.sh (mantiene vigencia)
