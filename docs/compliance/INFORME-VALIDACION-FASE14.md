@@ -88,6 +88,13 @@ Durante la verificación visual se detectó que el encabezado mostraba la clave 
 | `scripts/test-branding.py` | **Nuevo.** Suite E2E (58 verificaciones, autolimpiable) |
 | `DIFF-fase14.patch` | **Nuevo.** Diff de la fase |
 
+> **Nota de reorganización (post-entrega):** el parche `DIFF-fase14.patch`
+> citado como entregable de esta fase se retiró de la raíz del repositorio
+> durante la reorganización de higiene del proyecto; los 19 archivos del
+> inventario anterior ya están integrados en el árbol de código y
+> registrados en `CHANGELOG.md`. Este informe conserva la mención como
+> registro histórico de la entrega.
+
 ---
 
 ## 4. Notas de diseño y desviaciones justificadas
