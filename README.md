@@ -3,7 +3,7 @@
 > ⚖️ **AVISO LEGAL:** Copyright © 2026 Emmanuel Caballero De La Rosa. Todos los derechos reservados.  
 > Tijuana, Baja California, México. Este proyecto es propiedad privada y confidencial. Queda prohibida su reproducción, distribución o uso no autorizado sin permiso explícito por escrito.
 
-**Versión:** 2.0.0 — migración del motor de base de datos a **PostgreSQL 16** (requisito obligatorio; decisión ADR-009). Registro de cambios: [CHANGELOG.md](./CHANGELOG.md). Si actualizas desde la v1.1.1, sigue la [Guía de Migración](#guía-de-migración-desde-v111-sqlite).
+**Versión:** 2.1.0 — la versión vive únicamente en `package.json` ([Única Fuente de Verdad](#arquitectura-de-la-versión-única-fuente-de-verdad); anteriormente: migración del motor de base de datos a **PostgreSQL 16**, requisito que sigue vigente — decisión ADR-009). Registro de cambios: [CHANGELOG.md](./CHANGELOG.md). Si actualizas desde la v1.1.1, sigue la [Guía de Migración](#guía-de-migración-desde-v111-sqlite).
 
 Sistema web bilingüe (Español / Inglés) para el control y la gestión de almacén de fábrica:
 inventario multi-almacén, entradas, recepción de materia prima, salidas, traslados, ajustes,
@@ -141,9 +141,27 @@ La arquitectura general del sistema está documentada en
 
 ```bash
 bash scripts/simulacion-ci.sh                     # réplica local del pipeline de CI
+npm run test                                      # pruebas unitarias (Vitest, núcleo numérico)
 ADMIN_PASSWORD='...' python3 scripts/test-clientes.py   # E2E del módulo Clientes
 # (los demás scripts de scripts/ aceptan igualmente ADMIN_PASSWORD)
 ```
+
+## Arquitectura de la versión (Única Fuente de Verdad)
+
+Desde la v2.1.0, la versión del sistema vive **exclusivamente** en el campo
+`version` de [`package.json`](./package.json). El resto del sistema la lee de
+ahí — **nunca se escribe a mano** en componentes, rutas, scripts o
+documentación vigente:
+
+| Consumidor | Cómo obtiene la versión |
+|---|---|
+| Rutas API y Server Components | Importan `VERSION_DEL_SISTEMA` / `ETIQUETA_VERSION_SISTEMA` de [`src/lib/version.ts`](./src/lib/version.ts) (p. ej. el health check `GET /api` responde `{ estado, sistema, version }`). |
+| Client Components (pies de página, pantalla de acceso) | Reciben `versionDelSistema` como **prop** desde el Server Component raíz (`src/app/page.tsx`); así no se empaqueta `package.json` en el navegador. |
+| `deploy.sh` | Lee `package.json` en tiempo de ejecución (`sed`) para sus banners y para el encabezado de la unidad systemd. |
+
+**Para liberar una nueva versión**: cambia el campo `version` de
+`package.json`, añade la entrada correspondiente en `CHANGELOG.md` y el resto
+del sistema (UI, health check, banners de despliegue) se actualiza solo.
 
 ## Modelo de datos (resumen)
 
@@ -171,8 +189,8 @@ Si actualizas una instalación existente de la v1.1.1:
 1. Instala y arranca **PostgreSQL 16** (en despliegues con `deploy.sh` el propio
    instalador lo aprovisiona desde PGDG; con Docker, usa el servicio
    `postgres:16-alpine` del `docker-compose.yml`).
-2. Despliega la v2.0.0: `deploy.sh` crea rol, base y esquema (migraciones
-   auditables) y conserva tu `.env` en re-ejecuciones.
+2. Despliega la versión actual (v2.1.0): `deploy.sh` crea rol, base y esquema
+   (migraciones auditables) y conserva tu `.env` en re-ejecuciones.
 3. Migra los datos del archivo de la instalación anterior:
 
    ```bash

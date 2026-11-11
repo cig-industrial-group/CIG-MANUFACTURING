@@ -332,7 +332,20 @@ function MenuUsuario({ compacto = false }: { compacto?: boolean }) {
 // ============================================================
 // SIDEBAR (ESCRITORIO)
 // ============================================================
-function SidebarEscritorio({ permisos }: { permisos: string[] }) {
+/** Props compartidos por los componentes que muestran la versión del sistema
+ * (inyectada como prop desde el Server Component raíz: única fuente de
+ * verdad en package.json, ver @/lib/version). */
+type PropsConVersion = {
+  /** Etiqueta de versión (p. ej. "v2.1.0") heredada de src/app/page.tsx. */
+  versionDelSistema: string;
+};
+
+function SidebarEscritorio({
+  permisos,
+  versionDelSistema,
+}: {
+  permisos: string[];
+} & PropsConVersion) {
   const { t, idioma } = useIdioma();
   const { usuario } = useSesion();
   return (
@@ -352,7 +365,7 @@ function SidebarEscritorio({ permisos }: { permisos: string[] }) {
             </span>
           )}
         </div>
-        <p className="mt-2 text-[11px] text-muted-foreground/70">{t("app.version")}</p>
+        <p className="mt-2 text-[11px] text-muted-foreground/70">{versionDelSistema}</p>
       </div>
     </aside>
   );
@@ -361,7 +374,12 @@ function SidebarEscritorio({ permisos }: { permisos: string[] }) {
 // ============================================================
 // CONTENIDO PRINCIPAL
 // ============================================================
-function ContenidoPrincipal({ permisos }: { permisos: string[] }) {
+function ContenidoPrincipal({
+  permisos,
+  versionDelSistema,
+}: {
+  permisos: string[];
+} & PropsConVersion) {
   const { t, idioma } = useIdioma();
   const { seccion, cambiar } = useSeccionActiva();
   const { moduloId } = useModuloStore();
@@ -484,7 +502,7 @@ function ContenidoPrincipal({ permisos }: { permisos: string[] }) {
           <p>
             <span className="font-semibold text-foreground">{t("app.nombre")}</span> — {t("app.derechos")}
           </p>
-          <p>{t("app.version")}</p>
+          <p>{versionDelSistema}</p>
         </div>
       </footer>
     </div>
@@ -515,7 +533,7 @@ function PantallaCarga() {
 // ============================================================
 // RAÍZ DE LA APLICACIÓN (CONTROL DE SESIÓN)
 // ============================================================
-function RaizAplicacion() {
+function RaizAplicacion({ versionDelSistema }: PropsConVersion) {
   const { usuario, verificando, establecerUsuario } = useSesion();
 
   // Restaurar el último módulo visitado
@@ -527,15 +545,15 @@ function RaizAplicacion() {
   if (verificando) return <PantallaCarga />;
 
   // Sin sesión: pantalla de acceso
-  if (!usuario) return <PantallaAutenticacion />;
+  if (!usuario) return <PantallaAutenticacion versionDelSistema={versionDelSistema} />;
 
   const permisos = usuario.rol.permisos as string[];
 
   return (
     <>
       <div className="min-h-screen bg-background">
-        <SidebarEscritorio permisos={permisos} />
-        <ContenidoPrincipal permisos={permisos} />
+        <SidebarEscritorio permisos={permisos} versionDelSistema={versionDelSistema} />
+        <ContenidoPrincipal permisos={permisos} versionDelSistema={versionDelSistema} />
       </div>
       {/* Cambio obligatorio de contraseña temporal */}
       <DialogoCambioPassword
@@ -552,7 +570,10 @@ function RaizAplicacion() {
 // ============================================================
 // RAÍZ DEL SISTEMA
 // ============================================================
-export function SistemaGestionFabrica() {
+/** Shell raíz del sistema (Client Component). Recibe la versión del
+ * sistema como prop desde el Server Component raíz (src/app/page.tsx):
+ * única fuente de verdad en package.json (@/lib/version). */
+export function SistemaGestionFabrica({ versionDelSistema }: PropsConVersion) {
   const [queryClient] = useState(
     () =>
       new QueryClient({
@@ -570,7 +591,7 @@ export function SistemaGestionFabrica() {
     <QueryClientProvider client={queryClient}>
       <ProveedorIdioma>
         <ProveedorSesion>
-          <RaizAplicacion />
+          <RaizAplicacion versionDelSistema={versionDelSistema} />
         </ProveedorSesion>
       </ProveedorIdioma>
     </QueryClientProvider>

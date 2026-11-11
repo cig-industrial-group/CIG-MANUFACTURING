@@ -196,11 +196,25 @@ jobs:
             exit 1
           fi
 
-          # a) API viva
+          # a) API viva — health check SSOT (TASK-STR-003): GET /api devuelve
+          #    { estado, sistema, version }; la versión debe coincidir con el
+          #    campo "version" de package.json (única fuente de verdad, vía
+          #    @/lib/version). Sustituye a la comprobación del marcador
+          #    «Hello, world!» del andamiaje inicial.
           CUERPO=$(curl -sf "http://127.0.0.1:3100/api")
           echo "GET /api -> $CUERPO"
-          echo "$CUERPO" | grep -q 'Hello, world!' \
-            || { echo "::error::GET /api no devolvió el cuerpo esperado"; exit 1; }
+          CLAVES_FALTANTES=""
+          echo "$CUERPO" | grep -q '"estado"'  || CLAVES_FALTANTES="${CLAVES_FALTANTES} estado"
+          echo "$CUERPO" | grep -q '"sistema"' || CLAVES_FALTANTES="${CLAVES_FALTANTES} sistema"
+          echo "$CUERPO" | grep -q '"version"' || CLAVES_FALTANTES="${CLAVES_FALTANTES} version"
+          if [ -n "$CLAVES_FALTANTES" ]; then
+            echo "::error::GET /api no devolvió el cuerpo esperado (faltan claves SSOT:${CLAVES_FALTANTES})"
+            exit 1
+          fi
+          VERSION_PKG="$(grep -m1 '"version"' package.json | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+          echo "$CUERPO" | grep -q "\"version\"[[:space:]]*:[[:space:]]*\"${VERSION_PKG}\"" \
+            || { echo "::error::GET /api no devolvió el cuerpo esperado (la versión ${VERSION_PKG} de package.json no está en la respuesta: SSOT roto)"; exit 1; }
+          echo "API viva (health check SSOT: estado/sistema/version = ${VERSION_PKG})"
 
           # b) Login real contra la BD sembrada (contraseña de pruebas por entorno)
           LOGIN=$(curl -sf -c /tmp/cookies-ci.txt -X POST "http://127.0.0.1:3100/api/auth/login" \

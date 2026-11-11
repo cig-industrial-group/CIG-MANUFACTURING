@@ -183,8 +183,23 @@ echo "  ✔ servidor arriba"
 paso "9/9 Humo: API, login, sesión y límite de intentos"
 CUERPO=$(curl -sf "http://127.0.0.1:$PUERTO/api")
 echo "  GET /api -> $CUERPO"
-echo "$CUERPO" | grep -q 'Hello, world!' || fallo "GET /api no devolvió el cuerpo esperado"
-echo "  ✔ API viva"
+# Contrato del health check (TASK-STR-003, SSOT): GET /api devuelve
+# { estado, sistema, version }. Se exigen las tres claves y que la
+# versión informada coincida con el campo "version" de package.json
+# (única fuente de verdad, expuesta por la ruta vía @/lib/version).
+# Sustituye a la comprobación del marcador «Hello, world!» del
+# andamiaje inicial, que el endpoint ya no devuelve.
+CLAVES_FALTANTES=""
+echo "$CUERPO" | grep -q '"estado"'  || CLAVES_FALTANTES="${CLAVES_FALTANTES} estado"
+echo "$CUERPO" | grep -q '"sistema"' || CLAVES_FALTANTES="${CLAVES_FALTANTES} sistema"
+echo "$CUERPO" | grep -q '"version"' || CLAVES_FALTANTES="${CLAVES_FALTANTES} version"
+[ -z "$CLAVES_FALTANTES" ] \
+  || fallo "GET /api no devolvió el cuerpo esperado (faltan claves SSOT:${CLAVES_FALTANTES})"
+VERSION_PKG="$(grep -m1 '"version"' package.json \
+  | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')"
+echo "$CUERPO" | grep -q "\"version\"[[:space:]]*:[[:space:]]*\"${VERSION_PKG}\"" \
+  || fallo "GET /api no devolvió el cuerpo esperado (la versión ${VERSION_PKG} de package.json no está en la respuesta: SSOT roto)"
+echo "  ✔ API viva (health check SSOT: estado/sistema/version = ${VERSION_PKG})"
 
 LOGIN=$(curl -sf -c "$DIR_TMP/cookies.txt" -X POST "http://127.0.0.1:$PUERTO/api/auth/login" \
   -H "Content-Type: application/json" \

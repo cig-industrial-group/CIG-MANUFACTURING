@@ -8,8 +8,10 @@
 # ============================================================================
 
 # ============================================================
-# CIG-MANUFACTURING v2.0.0 — Instalador automatizado de despliegue
+# CIG-MANUFACTURING — Instalador automatizado de despliegue
 # para producción con aislamiento de seguridad extremo.
+# (La versión del sistema vive únicamente en package.json — SSOT,
+# ver el bloque VERSIÓN más abajo y src/lib/version.ts.)
 #
 # QUÉ HACE (Ubuntu 22.04 LTS virgen → producción):
 #   1. Endurece el sistema (actualización + firewall UFW).
@@ -106,6 +108,18 @@ APP_PORT="3000"
 # Directorio de origen (repositorio clonado donde vive este script)
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 readonly SCRIPT_DIR
+
+# -------------------------------------------------- VERSIÓN (ÚNICA FUENTE)
+# La versión del sistema vive EXCLUSIVAMENTE en package.json (TASK-STR-003,
+# SSOT): los banners de consola y el encabezado de la unidad systemd se
+# alimentan de esta lectura en tiempo de ejecución — deploy.sh ya NO
+# arrastra una versión duplicada que hubiera que editar a mano.
+VERSION_SISTEMA="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "${SCRIPT_DIR}/package.json" | head -n1)"
+readonly VERSION_SISTEMA
+if [[ -z "${VERSION_SISTEMA}" ]]; then
+  echo "ERROR: no se pudo leer la versión desde ${SCRIPT_DIR}/package.json." >&2
+  exit 1
+fi
 
 # ------------------------------------------------------------------ ESTILO
 if [[ -t 1 ]]; then
@@ -790,7 +804,7 @@ escribir_unit_app() {
 
   cat > "${destino}" <<EOF
 # ============================================================
-# CIG-MANUFACTURING v2.0.0 — Servicio de producción (systemd)
+# CIG-MANUFACTURING v${VERSION_SISTEMA} — Servicio de producción (systemd)
 # Generado por deploy.sh — NO editar a mano (se regenera).
 #
 # AISLAMIENTO: el proceso solo puede escribir en db/ (DATA_DIR: respaldos
@@ -1169,7 +1183,7 @@ resumen_final() {
 # ------------------------------------------------------------------ MAIN
 main() {
   printf '%s\n' "=============================================================="
-  printf '%s\n' "  CIG-MANUFACTURING v2.0.0 — Despliegue de producción seguro"
+  printf '%s\n' "  CIG-MANUFACTURING v${VERSION_SISTEMA} — Despliegue de producción seguro"
   printf '%s\n\n' "=============================================================="
 
   verificar_precondiciones
