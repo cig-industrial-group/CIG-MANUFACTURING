@@ -7,7 +7,9 @@
 # CONTACTO: caballeroemanuel966@gmail.com
 # ============================================================================
 
-# Empaqueta el código fuente de CIG-MANUFACTURING v2.0.0 en download/
+# Empaqueta el código fuente de CIG-MANUFACTURING en download/
+# (la versión del sistema vive únicamente en package.json — SSOT,
+# ver src/lib/version.ts; este script ya no la fija a mano)
 # (zip + tar.gz, estructura cig-manufacturing/, sin dependencias ni bases de datos)
 set -e
 cd /home/z/my-project

@@ -378,7 +378,14 @@ function DialogoRecuperacion({
 // ============================================================
 // PANTALLA DE ACCESO
 // ============================================================
-export function PantallaAutenticacion() {
+/** Pantalla de acceso. Recibe la versión del sistema como prop desde el
+ * shell raíz (heredada del Server Component src/app/page.tsx): única
+ * fuente de verdad en package.json (@/lib/version). */
+export function PantallaAutenticacion({
+  versionDelSistema,
+}: {
+  versionDelSistema: string;
+}) {
   const { t } = useIdioma();
   const { toast } = useToast();
   const { iniciarSesion, registrarse } = useSesion();
@@ -606,7 +613,7 @@ export function PantallaAutenticacion() {
           </div>
         )}
 
-        <p className="mt-8 text-xs text-muted-foreground">{t("app.version")}</p>
+        <p className="mt-8 text-xs text-muted-foreground">{versionDelSistema}</p>
       </div>
 
       {recuperacionAbierta && (

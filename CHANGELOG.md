@@ -5,6 +5,46 @@ Todos los cambios notables de este proyecto se documentarán en este archivo.
 El formato está basado en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/),
 y este proyecto se adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0/es/).
 
+## [2.1.0] - 2026-11-11
+
+> **Incremento MINOR (SemVer 2.0.0, §7):** nueva funcionalidad compatible hacia
+> atrás (módulo de versión centralizado y health check); sin cambios de interfaz
+> de despliegue ni de esquema de base de datos.
+
+### Added
+
+- **Versión del sistema como Única Fuente de Verdad (SSOT): nuevo módulo
+  `src/lib/version.ts`.** La versión vive exclusivamente en el campo `version`
+  de `package.json` y el resto del sistema la lee de ahí, eliminando las
+  copias a mano que obligaban a editar múltiples archivos por liberación y
+  derivaban en versiones desincronizadas entre UI, API y scripts.
+  - **Rutas API y Server Components** importan `VERSION_DEL_SISTEMA` /
+    `ETIQUETA_VERSION_SISTEMA` directamente del módulo.
+  - **Client Components** NO importan el módulo (evita empaquetar
+    `package.json` en el navegador): reciben la versión como **prop** desde
+    el Server Component raíz (`src/app/page.tsx`), que la distribuye al
+    shell (`SistemaGestionFabrica`) y de ahí a la pantalla de acceso y los
+    pies de página. La alternativa de variable de entorno inyectada en el
+    build (`NEXT_PUBLIC_APP_VERSION`) se descartó: replicaría la versión en
+    la configuración/CI, recreando la duplicación que se elimina.
+- **Health check en `GET /api`**: responde `{ estado, sistema, version }` con
+  la versión leída de `package.json` (el `HEALTHCHECK` del Dockerfile consume
+  el mismo endpoint; sustituye al marcador «Hello, world!» del andamiaje).
+
+### Changed
+
+- **Versión del sistema: v2.0.0 → v2.1.0** (campo `version` de `package.json`,
+  única fuente de verdad).
+- **UI**: la clave `app.version` se eliminó de los diccionarios ES/EN (la
+  versión no es un texto traducible); los pies de página del shell (escritorio
+  y móvil), la barra lateral y la pantalla de acceso muestran la versión
+  recibida por prop.
+- **`deploy.sh`**: los banners de consola y el encabezado de la unidad
+  systemd leen la versión de `package.json` en tiempo de ejecución (`sed`,
+  sin dependencias nuevas); el script ya no arrastra una versión duplicada.
+- **`scripts/empaquetar.sh`**: el comentario de cabecera deja de fijar la
+  versión a mano.
+
 ## [2.0.0] - 2026-11-07
 
 > **Justificación del incremento MAYOR (SemVer 2.0.0, §7–§8):** la migración de motor
@@ -112,4 +152,5 @@ y este proyecto se adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.
 - **Migraciones históricas del motor anterior**: el directorio `prisma/migrations`
   arranca desde una línea base única de PostgreSQL (auditada).
 
+[2.1.0]: https://github.com/cig-industrial-group/CIG-MANUFACTURING/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/cig-industrial-group/CIG-MANUFACTURING/compare/v1.1.1...v2.0.0

@@ -31,7 +31,9 @@ export const diccionario = {
       proximo: "Próximamente",
       idioma: "Idioma",
       menu: "Menú",
-      version: "v2.0.0",
+      // (TASK-STR-003) «version» se eliminó del diccionario: la versión del
+      // sistema NO es un texto traducible; llega como prop desde el Server
+      // Component raíz (única fuente de verdad: package.json → @/lib/version).
       derechos: "Sistema de gestión para plantas de manufactura",
     },
     comun: {
@@ -955,7 +957,9 @@ export const diccionario = {
       proximo: "Coming soon",
       idioma: "Language",
       menu: "Menu",
-      version: "v2.0.0",
+      // (TASK-STR-003) «version» removed from the dictionary: the system
+      // version is NOT translatable text; it arrives as a prop from the root
+      // Server Component (single source of truth: package.json → @/lib/version).
       derechos: "Management system for manufacturing plants",
     },
     comun: {
