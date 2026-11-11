@@ -17,9 +17,29 @@
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { CERO, ESCALA_MAXIMA, type Decimal, desdeBD, texto } from "@/lib/numerico";
+import {
+  comoFolioMovimiento,
+  type FolioMovimiento,
+  type IdAlmacen,
+  type IdMovimiento,
+  type IdProducto,
+} from "@/lib/tipos-dominio";
 import { resolverConteoTx } from "@/modulos/unidades/servicios/nucleo";
 import { parsearConteo, type ParteConteo } from "@/modulos/unidades/tipos";
 import type { TipoMovimiento } from "../tipos";
+
+/**
+ * CONTRATO DE IDENTIFICADORES NOMINALES
+ * Las operaciones de este servicio que MUTAN stock o bitácora exigen tipos
+ * nominales (`IdProducto`, `IdAlmacen`, `IdMovimiento`) en vez de `string`
+ * crudo: el compilador rechaza intercambiar ids de distintas entidades y la
+ * única vía de construcción son las fábricas de `@/lib/tipos-dominio`
+ * (que validan formato y devuelven null ante valores inválidos).
+ * Las proyecciones de FILAS de base de datos (`FilaMovimiento`, snapshots y
+ * reversiones sobre historia persistida) conservan `string` a propósito:
+ * así sale el dato de Prisma y no se re-valida lo que el sistema mismo
+ * escribió; brandearlo obligaría a manejar nulos imposibles en cada lectura.
+ */
 
 const PREFIJOS: Record<TipoMovimiento, string> = {
   ENTRADA: "ENT",
@@ -94,8 +114,13 @@ export async function reservarNumeroSerie(
  *  La numeración es monotónica por serie (prefijo+fecha) y NO se reutiliza
  *  aunque se eliminen movimientos. `tx` permite reservar dentro de la
  *  transacción activa: una liberación con varias partidas crea varios
- *  movimientos seguidos y cada uno ve los números ya reservados. */
-export async function generarFolio(tipo: TipoMovimiento, tx: PrismaTx = db): Promise<string> {
+ *  movimientos seguidos y cada uno ve los números ya reservados.
+ *  Devuelve un `FolioMovimiento` nominal: el folio se construye aquí mismo
+ *  (formato garantizado) y se brandea tras verificar su patrón canónico. */
+export async function generarFolio(
+  tipo: TipoMovimiento,
+  tx: PrismaTx = db,
+): Promise<FolioMovimiento> {
   const serie = `${PREFIJOS[tipo]}-${fechaCompacta()}`;
   const prefijo = `${serie}-`;
   const numero = await reservarNumeroSerie(tx, serie, async () => {
@@ -113,7 +138,14 @@ export async function generarFolio(tipo: TipoMovimiento, tx: PrismaTx = db): Pro
       ...archivados.map((c) => numeroDeFolio(c.folio, prefijo)),
     );
   });
-  return `${serie}-${String(numero).padStart(4, "0")}`;
+  const textoFolio = `${serie}-${String(numero).padStart(4, "0")}`;
+  // El formato está garantizado por construcción (PPP-AAAAMMDD-NNNN);
+  // la verificación es defensa en profundidad ante regresiones del generador.
+  const folio = comoFolioMovimiento(textoFolio);
+  if (!folio) {
+    throw new ErrorNegocio("ERROR_INTERNO", 500);
+  }
+  return folio;
 }
 
 export class ErrorNegocio extends Error {
@@ -222,9 +254,9 @@ async function aplicarEfectoStockTx(
   tx: PrismaTx,
   cuerpo: {
     tipo: TipoMovimiento;
-    productoId: string;
-    almacenOrigenId?: string;
-    almacenDestinoId?: string;
+    productoId: IdProducto;
+    almacenOrigenId?: IdAlmacen;
+    almacenDestinoId?: IdAlmacen;
     cantidad: Decimal;
   },
 ) {
@@ -474,9 +506,9 @@ export async function registrarMovimientoTx(
   tx: PrismaTx,
   cuerpo: {
     tipo: TipoMovimiento;
-    productoId: string;
-    almacenOrigenId?: string;
-    almacenDestinoId?: string;
+    productoId: IdProducto;
+    almacenOrigenId?: IdAlmacen;
+    almacenDestinoId?: IdAlmacen;
     cantidad: Decimal;
     motivo?: string;
     referencia?: string;
@@ -569,11 +601,11 @@ export async function registrarMovimientoTx(
  */
 export async function editarMovimientoTx(
   tx: PrismaTx,
-  id: string,
+  id: IdMovimiento,
   cuerpo: {
-    productoId: string;
-    almacenOrigenId?: string;
-    almacenDestinoId?: string;
+    productoId: IdProducto;
+    almacenOrigenId?: IdAlmacen;
+    almacenDestinoId?: IdAlmacen;
     cantidad: Decimal;
     motivo?: string;
     referencia?: string;
@@ -669,7 +701,7 @@ export async function editarMovimientoTx(
  */
 export async function eliminarMovimientoTx(
   tx: PrismaTx,
-  id: string,
+  id: IdMovimiento,
   meta: { motivoCorreccion: string; usuarioId: string; usuarioNombre?: string },
 ) {
   if (!meta.motivoCorreccion?.trim()) throw new ErrorNegocio("MOTIVO_CORRECCION_REQUERIDO");

@@ -11,6 +11,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { transaccion } from "@/lib/reintentos";
+import { comoIdAlmacenOpcional, comoIdProducto } from "@/lib/tipos-dominio";
 import { requerirPermiso } from "@/modulos/autenticacion/servicios/auth";
 import {
   ErrorNegocio,
@@ -120,8 +121,27 @@ export async function POST(request: Request) {
     if (!TIPOS_VALIDOS.includes(tipo)) {
       return NextResponse.json({ error: "TIPO_INVALIDO" }, { status: 400 });
     }
-    if (!cuerpo.productoId) {
+
+    // Identificadores nominales: conversión en la frontera HTTP con los
+    // códigos de error existentes de la API. Un id ausente o malformado se
+    // rechaza de inmediato (fail-closed) y jamás llega al núcleo de stock.
+    // (`null` = vino con formato inválido; `undefined` = no vino: el núcleo
+    // aplicará su regla de «campo requerido» según el tipo de movimiento.)
+    const productoId = comoIdProducto(String(cuerpo.productoId ?? ""));
+    if (!productoId) {
       return NextResponse.json({ error: "PRODUCTO_REQUERIDO" }, { status: 400 });
+    }
+    const almacenOrigenId = comoIdAlmacenOpcional(
+      cuerpo.almacenOrigenId ? String(cuerpo.almacenOrigenId) : undefined,
+    );
+    if (almacenOrigenId === null) {
+      return NextResponse.json({ error: "ALMACEN_INVALIDO" }, { status: 400 });
+    }
+    const almacenDestinoId = comoIdAlmacenOpcional(
+      cuerpo.almacenDestinoId ? String(cuerpo.almacenDestinoId) : undefined,
+    );
+    if (almacenDestinoId === null) {
+      return NextResponse.json({ error: "ALMACEN_INVALIDO" }, { status: 400 });
     }
 
     // Los ajustes de inventario requieren un permiso distinto al resto de movimientos
@@ -139,9 +159,9 @@ export async function POST(request: Request) {
     const resultado = await transaccion((tx) =>
       registrarMovimientoTx(tx, {
         tipo,
-        productoId: String(cuerpo.productoId),
-        almacenOrigenId: cuerpo.almacenOrigenId || undefined,
-        almacenDestinoId: cuerpo.almacenDestinoId || undefined,
+        productoId,
+        almacenOrigenId,
+        almacenDestinoId,
         cantidad,
         motivo: cuerpo.motivo,
         referencia: cuerpo.referencia,

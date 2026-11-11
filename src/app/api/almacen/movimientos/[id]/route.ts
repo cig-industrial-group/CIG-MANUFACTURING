@@ -12,6 +12,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { transaccion } from "@/lib/reintentos";
 import { aDecimal } from "@/lib/numerico";
+import { comoIdAlmacenOpcional, comoIdMovimiento, comoIdProducto } from "@/lib/tipos-dominio";
 import { requerirPermiso } from "@/modulos/autenticacion/servicios/auth";
 import {
   ErrorNegocio,
@@ -70,9 +71,33 @@ export async function PATCH(request: Request, { params }: Ctx) {
     const { id } = await params;
     const cuerpo = await request.json();
 
-    if (!cuerpo.productoId) {
+    // Identificador nominal del movimiento: un id de ruta malformado se
+    // trata como inexistente (mismo código/estado que la consulta previa).
+    const idMovimiento = comoIdMovimiento(id);
+    if (!idMovimiento) {
+      return NextResponse.json({ error: "MOVIMIENTO_NO_EXISTE" }, { status: 404 });
+    }
+
+    // Identificadores nominales del cuerpo (frontera HTTP, fail-closed):
+    // `null` = vino con formato inválido; `undefined` = no vino (el núcleo
+    // aplicará su regla de «campo requerido» según el tipo de movimiento).
+    const productoId = comoIdProducto(String(cuerpo.productoId ?? ""));
+    if (!productoId) {
       return NextResponse.json({ error: "PRODUCTO_REQUERIDO" }, { status: 400 });
     }
+    const almacenOrigenId = comoIdAlmacenOpcional(
+      cuerpo.almacenOrigenId ? String(cuerpo.almacenOrigenId) : undefined,
+    );
+    if (almacenOrigenId === null) {
+      return NextResponse.json({ error: "ALMACEN_INVALIDO" }, { status: 400 });
+    }
+    const almacenDestinoId = comoIdAlmacenOpcional(
+      cuerpo.almacenDestinoId ? String(cuerpo.almacenDestinoId) : undefined,
+    );
+    if (almacenDestinoId === null) {
+      return NextResponse.json({ error: "ALMACEN_INVALIDO" }, { status: 400 });
+    }
+
     if (!cuerpo.motivoCorreccion?.trim()) {
       return NextResponse.json({ error: "MOTIVO_CORRECCION_REQUERIDO" }, { status: 400 });
     }
@@ -85,11 +110,11 @@ export async function PATCH(request: Request, { params }: Ctx) {
     const resultado = await transaccion((tx) =>
       editarMovimientoTx(
         tx,
-        id,
+        idMovimiento,
         {
-          productoId: String(cuerpo.productoId),
-          almacenOrigenId: cuerpo.almacenOrigenId || undefined,
-          almacenDestinoId: cuerpo.almacenDestinoId || undefined,
+          productoId,
+          almacenOrigenId,
+          almacenDestinoId,
           cantidad,
           motivo: cuerpo.motivo,
           referencia: cuerpo.referencia,
@@ -122,6 +147,12 @@ export async function DELETE(request: Request, { params }: Ctx) {
     const { usuario } = guardia;
 
     const { id } = await params;
+    // Identificador nominal del movimiento: un id de ruta malformado se
+    // trata como inexistente (mismo código/estado que la consulta previa).
+    const idMovimiento = comoIdMovimiento(id);
+    if (!idMovimiento) {
+      return NextResponse.json({ error: "MOVIMIENTO_NO_EXISTE" }, { status: 404 });
+    }
     let motivoCorreccion = "";
     try {
       const cuerpo = await request.json();
@@ -134,7 +165,7 @@ export async function DELETE(request: Request, { params }: Ctx) {
     }
 
     const resultado = await transaccion((tx) =>
-      eliminarMovimientoTx(tx, id, {
+      eliminarMovimientoTx(tx, idMovimiento, {
         motivoCorreccion,
         usuarioId: usuario.id,
         usuarioNombre: usuario.nombre,

@@ -42,6 +42,9 @@ cargarEnvProyecto();
 const { registrarMovimientoTx, ErrorNegocio } = await import(
   "../src/modulos/almacen/servicios/nucleo"
 );
+// Fábricas de tipos nominales: los ids del escenario pasan por la misma
+// validación de formato que la frontera HTTP del sistema real.
+const { comoIdAlmacen, comoIdProducto } = await import("../src/lib/tipos-dominio");
 
 const db = new PrismaClient();
 
@@ -52,6 +55,17 @@ function afirmar(condicion: boolean, mensaje: string) {
 }
 
 async function main() {
+  // Identificadores nominales del escenario de prueba (las filas se crean
+  // más abajo en esta misma función). Si un literal no cumpliera el
+  // formato, la prueba debe fallar de inmediato; declarados DENTRO de
+  // main() para que el estrechamiento de la guardia aplique a todo el
+  // flujo secuencial.
+  const idProductoPrueba = comoIdProducto("smoke-f1-p1");
+  const idAlmacenPrueba = comoIdAlmacen("smoke-f1-a1");
+  if (!idProductoPrueba || !idAlmacenPrueba) {
+    throw new Error("Identificadores del escenario de prueba con formato inválido");
+  }
+
   console.log("== Preparación: producto y almacén de prueba ==");
   await db.movimiento.deleteMany({ where: { productoId: "smoke-f1-p1" } });
   await db.stock.deleteMany({ where: { productoId: "smoke-f1-p1" } });
@@ -90,8 +104,8 @@ async function main() {
     await db.$transaction((tx) =>
       registrarMovimientoTx(tx, {
         tipo: "ENTRADA",
-        productoId: "smoke-f1-p1",
-        almacenDestinoId: "smoke-f1-a1",
+        productoId: idProductoPrueba,
+        almacenDestinoId: idAlmacenPrueba,
         cantidad: new Prisma.Decimal("0.1"),
         usuarioId: "smoke",
         usuarioNombre: "Prueba de humo",
@@ -112,8 +126,8 @@ async function main() {
     await db.$transaction((tx) =>
       registrarMovimientoTx(tx, {
         tipo: "ENTRADA",
-        productoId: "smoke-f1-p1",
-        almacenDestinoId: "smoke-f1-a1",
+        productoId: idProductoPrueba,
+        almacenDestinoId: idAlmacenPrueba,
         cantidad: new Prisma.Decimal("0.30000000000000004"), // 17 decimales: ilegal
         usuarioId: "smoke",
         usuarioNombre: "Prueba de humo",
@@ -128,8 +142,8 @@ async function main() {
   const movSalida = await db.$transaction((tx) =>
     registrarMovimientoTx(tx, {
       tipo: "SALIDA",
-      productoId: "smoke-f1-p1",
-      almacenOrigenId: "smoke-f1-a1",
+      productoId: idProductoPrueba,
+      almacenOrigenId: idAlmacenPrueba,
       cantidad: new Prisma.Decimal("0.1"),
       usuarioId: "smoke",
       usuarioNombre: "Prueba de humo",
@@ -142,8 +156,8 @@ async function main() {
   const movConteo = await db.$transaction((tx) =>
     registrarMovimientoTx(tx, {
       tipo: "ENTRADA",
-      productoId: "smoke-f1-p1",
-      almacenDestinoId: "smoke-f1-a1",
+      productoId: idProductoPrueba,
+      almacenDestinoId: idAlmacenPrueba,
       cantidad: new Prisma.Decimal("1"), // ignorado: el conteo manda
       conteo: { unidad: "PAQ", paquetes: "3", sueltas: "0.5" },
       usuarioId: "smoke",
@@ -164,8 +178,8 @@ async function main() {
   const movAjuste = await db.$transaction((tx) =>
     registrarMovimientoTx(tx, {
       tipo: "AJUSTE",
-      productoId: "smoke-f1-p1",
-      almacenDestinoId: "smoke-f1-a1",
+      productoId: idProductoPrueba,
+      almacenDestinoId: idAlmacenPrueba,
       cantidad: new Prisma.Decimal("-0.15"),
       motivo: "Conteo físico",
       usuarioId: "smoke",
@@ -181,8 +195,8 @@ async function main() {
     await db.$transaction((tx) =>
       registrarMovimientoTx(tx, {
         tipo: "SALIDA",
-        productoId: "smoke-f1-p1",
-        almacenOrigenId: "smoke-f1-a1",
+        productoId: idProductoPrueba,
+        almacenOrigenId: idAlmacenPrueba,
         cantidad: new Prisma.Decimal("8.06"), // excede por 0.01 exactos
         usuarioId: "smoke",
         usuarioNombre: "Prueba de humo",
