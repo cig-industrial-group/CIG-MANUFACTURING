@@ -79,6 +79,11 @@ const {
   eliminarMovimientoTx,
   fechaCompacta,
 } = await import("../src/modulos/almacen/servicios/nucleo");
+// Fábricas de tipos nominales: los ids del fixture pasan por la misma
+// validación de formato que la frontera HTTP del sistema real.
+const { comoIdAlmacen, comoIdMovimiento, comoIdProducto } = await import(
+  "../src/lib/tipos-dominio"
+);
 const { enviarProductoAPapelera, restaurarDePapelera } = await import(
   "../src/modulos/papelera/servicios/nucleo"
 );
@@ -408,6 +413,18 @@ async function construirFixture(ruta: string): Promise<Record<string, number>> {
 // MAIN
 // ============================================================
 async function main(): Promise<void> {
+  // Identificadores nominales del fixture (los crea la sección B más
+  // abajo). Si un literal no cumpliera el formato, fallar de inmediato;
+  // declarados DENTRO de main() para que el estrechamiento de la guardia
+  // aplique a todo el flujo secuencial de la prueba.
+  const idProductoF1 = comoIdProducto("prd-fixture-01");
+  const idProductoF2 = comoIdProducto("prd-fixture-02");
+  const idAlmacenF1 = comoIdAlmacen("alm-fixture-01");
+  const idAlmacenF2 = comoIdAlmacen("alm-fixture-02");
+  if (!idProductoF1 || !idProductoF2 || !idAlmacenF1 || !idAlmacenF2) {
+    throw new Error("Identificadores del fixture con formato inválido");
+  }
+
   console.log("PRUEBA DE HUMO — FASE 6: migración de motor + PostgreSQL end-to-end\n");
   const t0 = Date.now();
 
@@ -522,8 +539,8 @@ async function main(): Promise<void> {
   const movContinuo = await transaccion((tx) =>
     registrarMovimientoTx(tx, {
       tipo: "ENTRADA",
-      productoId: "prd-fixture-01",
-      almacenDestinoId: "alm-fixture-01",
+      productoId: idProductoF1,
+      almacenDestinoId: idAlmacenF1,
       cantidad: new Prisma.Decimal("10"),
       motivo: "Prueba de humo Fase 6: continuidad de folio",
       usuarioId: USUARIO.id,
@@ -539,8 +556,12 @@ async function main(): Promise<void> {
     `snapshot del ledger exacto: 70 + 10 = "${movContinuo.cantidadDespues}"`,
   );
 
+  // Identificador nominal del movimiento recién registrado (id generado
+  // por la base; la conversión no puede fallar — defensa en profundidad).
+  const idMovContinuo = comoIdMovimiento(movContinuo.id);
+  if (!idMovContinuo) throw new Error("El movimiento registrado no produjo un id válido");
   const { folio: folioEliminado } = await transaccion((tx) =>
-    eliminarMovimientoTx(tx, movContinuo.id, {
+    eliminarMovimientoTx(tx, idMovContinuo, {
       motivoCorreccion: "Prueba de humo Fase 6: folio no reutilizable",
       usuarioId: USUARIO.id,
       usuarioNombre: USUARIO.nombre,
@@ -551,8 +572,8 @@ async function main(): Promise<void> {
   const movPosterior = await transaccion((tx) =>
     registrarMovimientoTx(tx, {
       tipo: "ENTRADA",
-      productoId: "prd-fixture-01",
-      almacenDestinoId: "alm-fixture-01",
+      productoId: idProductoF1,
+      almacenDestinoId: idAlmacenF1,
       cantidad: new Prisma.Decimal("1"),
       motivo: "Prueba de humo Fase 6: número liberado no se reutiliza",
       usuarioId: USUARIO.id,
@@ -567,8 +588,8 @@ async function main(): Promise<void> {
   const movSerieNueva = await transaccion((tx) =>
     registrarMovimientoTx(tx, {
       tipo: "SALIDA",
-      productoId: "prd-fixture-02",
-      almacenOrigenId: "alm-fixture-02",
+      productoId: idProductoF2,
+      almacenOrigenId: idAlmacenF2,
       cantidad: new Prisma.Decimal("5"),
       motivo: "Prueba de humo Fase 6: serie nueva del día",
       usuarioId: USUARIO.id,

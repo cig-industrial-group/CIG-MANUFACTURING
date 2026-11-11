@@ -25,6 +25,12 @@ import { db } from "@/lib/db";
 import { transaccion } from "@/lib/reintentos";
 import { CERO, type Decimal, aDecimal, esMayorQueCero } from "@/lib/numerico";
 import {
+  comoIdAlmacen,
+  comoIdAlmacenOpcional,
+  comoIdMovimiento,
+  comoIdProducto,
+} from "@/lib/tipos-dominio";
+import {
   ErrorNegocio,
   editarMovimientoTx,
   eliminarMovimientoTx,
@@ -261,6 +267,11 @@ export async function liberarSalidaOQC(args: {
     const almacen = await tx.almacen.findUnique({ where: { id: args.almacenOrigenId } });
     if (!almacen || !almacen.activo) throw new ErrorNegocio("ALMACEN_INVALIDO");
 
+    // Identificador nominal del almacén ya verificado (la conversión no
+    // puede fallar con un cuid de la base; se defiende el flujo por si acaso).
+    const idAlmacenOrigen = comoIdAlmacen(almacen.id);
+    if (!idAlmacenOrigen) throw new ErrorNegocio("ALMACEN_INVALIDO");
+
     // Fusionar partidas duplicadas y validar cantidades. Cada línea puede
     // capturarse DIRECTA (cantidad en unidad base) o EN PAQUETES (conteo);
     // el total se calcula de forma autoritativa contra el catálogo de
@@ -338,13 +349,17 @@ export async function liberarSalidaOQC(args: {
     // Una partida (movimiento SALIDA) por producto, ligada al folio.
     // Las capturas en paquetes del mismo producto viajan fusionadas.
     const partidas: PartidaSalida[] = [];
-    for (const [productoId, acumulado] of acumulados) {
+    for (const [productoIdCrudo, acumulado] of acumulados) {
+      // Identificador nominal: cada producto fue verificado con findUnique
+      // al acumular sus líneas; la conversión no puede fallar (defensa).
+      const productoId = comoIdProducto(productoIdCrudo);
+      if (!productoId) throw new ErrorNegocio("PRODUCTO_NO_EXISTE", 404);
       const fusion =
         acumulado.partes.length > 0 ? fusionarPartesConteo(acumulado.partes) : null;
       const mov = await registrarMovimientoTx(tx, {
         tipo: "SALIDA",
         productoId,
-        almacenOrigenId: almacen.id,
+        almacenOrigenId: idAlmacenOrigen,
         cantidad: fusion ? fusion.cantidad : acumulado.cantidad,
         referencia: args.referencia?.trim() || folioSalida,
         responsable: args.responsable?.trim() || args.usuario.nombre,
@@ -398,12 +413,27 @@ export async function corregirPartidaSalidaOQC(
     const cantidad = aDecimal(cuerpo.cantidad);
     if (!cantidad) throw new ErrorNegocio("QUANTIDAD_INVALIDA");
 
+    // Identificadores nominales: el movimiento proviene de una fila de BD
+    // ya verificada (conversión infalible — defensa en profundidad);
+    // producto y almacén llegan por HTTP y un formato inválido se reporta
+    // con el mismo código que produciría el núcleo al no hallar la entidad.
+    const idMovimiento = comoIdMovimiento(partida.id);
+    if (!idMovimiento) throw new ErrorNegocio("PARTIDA_NO_EXISTE", 404);
+    const productoId = comoIdProducto(String(cuerpo.productoId ?? ""));
+    if (!productoId) throw new ErrorNegocio("PRODUCTO_NO_EXISTE", 404);
+    // `null` = vino con formato inválido; `undefined` = no vino (el núcleo
+    // aplicará su regla de «campo requerido» según el tipo de movimiento).
+    const almacenOrigenId = comoIdAlmacenOpcional(
+      cuerpo.almacenOrigenId ?? salida.almacenOrigenId ?? undefined,
+    );
+    if (almacenOrigenId === null) throw new ErrorNegocio("ALMACEN_INVALIDO");
+
     const actualizado = await editarMovimientoTx(
       tx,
-      partidaId,
+      idMovimiento,
       {
-        productoId: cuerpo.productoId,
-        almacenOrigenId: cuerpo.almacenOrigenId ?? salida.almacenOrigenId ?? undefined,
+        productoId,
+        almacenOrigenId,
         cantidad,
         motivo: cuerpo.motivo,
         // Espejo de la cabecera (mismas reglas que al liberar): si la
@@ -437,7 +467,12 @@ export async function eliminarPartidaSalidaOQC(
     const partida = partidas.find((p) => p.id === partidaId);
     if (!partida) throw new ErrorNegocio("PARTIDA_NO_EXISTE", 404);
 
-    const { folio } = await eliminarMovimientoTx(tx, partidaId, {
+    // Identificador nominal del movimiento (fila de BD verificada; la
+    // conversión no puede fallar — defensa en profundidad).
+    const idMovimiento = comoIdMovimiento(partida.id);
+    if (!idMovimiento) throw new ErrorNegocio("PARTIDA_NO_EXISTE", 404);
+
+    const { folio } = await eliminarMovimientoTx(tx, idMovimiento, {
       motivoCorreccion: meta.motivoCorreccion,
       usuarioId: meta.usuarioId,
       usuarioNombre: meta.usuarioNombre,
@@ -539,7 +574,11 @@ export async function eliminarSalidaOQC(
     const { salida, partidas } = await salidaEmitidaConPartidas(tx, id);
 
     for (const partida of partidas) {
-      await eliminarMovimientoTx(tx, partida.id, {
+      // Identificador nominal del movimiento (fila de BD; conversión
+      // infalible con cuid — defensa en profundidad).
+      const idMovimiento = comoIdMovimiento(partida.id);
+      if (!idMovimiento) throw new ErrorNegocio("PARTIDA_NO_EXISTE", 404);
+      await eliminarMovimientoTx(tx, idMovimiento, {
         motivoCorreccion: meta.motivoCorreccion,
         usuarioId: meta.usuarioId,
         usuarioNombre: meta.usuarioNombre,
@@ -591,10 +630,17 @@ export async function registrarScrapOQC(
 
     // El movimiento SCRAP genera el folio SCR-... (el conteo en paquetes,
     // si viene, se valida y calcula de forma autoritativa ahí)
+    // Identificadores nominales (frontera HTTP): un formato inválido se
+    // reporta con el mismo código que produciría el núcleo de almacén al
+    // no hallar la entidad.
+    const productoId = comoIdProducto(String(cuerpo.productoId));
+    if (!productoId) throw new ErrorNegocio("PRODUCTO_NO_EXISTE", 404);
+    const almacenOrigenId = comoIdAlmacen(String(cuerpo.almacenId));
+    if (!almacenOrigenId) throw new ErrorNegocio("ALMACEN_INVALIDO");
     const mov = await registrarMovimientoTx(tx, {
       tipo: "SCRAP",
-      productoId: cuerpo.productoId,
-      almacenOrigenId: cuerpo.almacenId,
+      productoId,
+      almacenOrigenId,
       cantidad: cantidadScrap,
       motivo: cuerpo.motivo.trim(),
       responsable: cuerpo.responsable?.trim() || usuario.nombre,
@@ -650,19 +696,32 @@ export async function corregirScrapOQC(
     if (!registro) throw new ErrorNegocio("SCRAP_NO_EXISTE", 404);
     if (!registro.movimientoId) throw new ErrorNegocio("REGISTRO_HISTORICO", 409);
 
-    const productoId = cuerpo.productoId ?? registro.productoId;
-    const almacenId = cuerpo.almacenId ?? registro.almacenId ?? undefined;
     const cantidadDecimal = aDecimal(
       cuerpo.cantidad !== undefined ? cuerpo.cantidad : registro.cantidad,
     );
     if (!cantidadDecimal) throw new ErrorNegocio("QUANTIDAD_INVALIDA");
 
+    // Identificadores nominales: el movimiento proviene de la BD (conversión
+    // infalible — defensa en profundidad); producto y almacén pueden venir
+    // del cuerpo HTTP o del registro persistido y un formato inválido se
+    // reporta con el código que usaría el núcleo al no hallar la entidad.
+    const idMovimiento = comoIdMovimiento(registro.movimientoId);
+    if (!idMovimiento) throw new ErrorNegocio("MOVIMIENTO_NO_EXISTE", 404);
+    const productoId = comoIdProducto(String(cuerpo.productoId ?? registro.productoId));
+    if (!productoId) throw new ErrorNegocio("PRODUCTO_NO_EXISTE", 404);
+    // `null` = vino con formato inválido; `undefined` = no vino (el núcleo
+    // aplicará su regla de «campo requerido» según el tipo de movimiento).
+    const almacenOrigenId = comoIdAlmacenOpcional(
+      cuerpo.almacenId ?? registro.almacenId ?? undefined,
+    );
+    if (almacenOrigenId === null) throw new ErrorNegocio("ALMACEN_INVALIDO");
+
     const actualizado = await editarMovimientoTx(
       tx,
-      registro.movimientoId,
+      idMovimiento,
       {
         productoId,
-        almacenOrigenId: almacenId,
+        almacenOrigenId,
         cantidad: cantidadDecimal,
         motivo: cuerpo.motivo ?? registro.motivo,
         referencia: undefined,
@@ -710,7 +769,11 @@ export async function eliminarScrapOQC(
     const registro = await tx.registroScrap.findUnique({ where: { id } });
     if (!registro) throw new ErrorNegocio("SCRAP_NO_EXISTE", 404);
     if (registro.movimientoId) {
-      await eliminarMovimientoTx(tx, registro.movimientoId, {
+      // Identificador nominal del movimiento (fila de BD; conversión
+      // infalible — defensa en profundidad).
+      const idMovimiento = comoIdMovimiento(registro.movimientoId);
+      if (!idMovimiento) throw new ErrorNegocio("MOVIMIENTO_NO_EXISTE", 404);
+      await eliminarMovimientoTx(tx, idMovimiento, {
         motivoCorreccion: meta.motivoCorreccion,
         usuarioId: meta.usuarioId,
         usuarioNombre: meta.usuarioNombre,
