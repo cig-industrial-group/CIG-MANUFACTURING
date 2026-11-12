@@ -65,13 +65,38 @@ export const POLITICAS = {
   login: { maxFallos: 5, ventanaMs: 15 * 60 * 1000, bloqueoMs: 15 * 60 * 1000 },
   /** Login por IP (varias cuentas): 20 fallos/15 min → bloqueo 15 min. */
   loginIp: { maxFallos: 20, ventanaMs: 15 * 60 * 1000, bloqueoMs: 15 * 60 * 1000 },
-  /** Solicitud de código de recuperación: 3 por correo+IP en 15 min. */
+  /**
+   * Solicitud de código de recuperación: 3 por CUENTA (correo) en 15 min.
+   * La clave es rec:cta:{correo} (ver claveRecuperacion): sin componente
+   * de IP — la rotación de X-Forwarded-For no evade el límite
+   * (TASK-STR-004, cierre del hallazgo H1).
+   */
   recuperacion: { maxFallos: 3, ventanaMs: 15 * 60 * 1000, bloqueoMs: 15 * 60 * 1000 },
   /** Confirmación de código: 5 intentos fallidos por correo+IP. */
   confirmacion: { maxFallos: 5, ventanaMs: 15 * 60 * 1000, bloqueoMs: 15 * 60 * 1000 },
   /** Autoregistro: 5 cuentas por IP por hora. */
   registro: { maxFallos: 5, ventanaMs: 60 * 60 * 1000, bloqueoMs: 60 * 60 * 1000 },
 } as const satisfies Record<string, PoliticaLimite>;
+
+/**
+ * Clave de limitación de las solicitudes de código de recuperación
+ * (TASK-STR-004 — cierre del hallazgo H1).
+ *
+ * EXCLUSIVAMENTE por cuenta: rec:cta:{correo}. NO incluye la IP de la
+ * petición: con el esquema anterior (rec:{correo}:{ip}) un atacante
+ * evadía el límite rotando la cabecera X-Forwarded-For y podía solicitar
+ * códigos sin restricción sobre una misma cuenta. El correo debe llegar
+ * ya normalizado en minúsculas (el endpoint lo hace antes de consultar).
+ *
+ * Contrapartida asumida: un tercero puede agotar con 3 peticiones el
+ * cupo de recuperación de una cuenta ajena durante el enfriamiento
+ * (15 min). Se prefiere este riesgo — acotado, temporal y sin efecto
+ * sobre el inicio de sesión — frente a la evasión del límite por
+ * rotación de IP.
+ */
+export function claveRecuperacion(correo: string): string {
+  return `rec:cta:${correo}`;
+}
 
 /**
  * Registra un FALLO para la clave bajo una política.
