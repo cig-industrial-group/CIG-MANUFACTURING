@@ -81,6 +81,34 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "CODIGO_EXPIRADO" }, { status: 400 });
     }
 
+    // TASK-STR-005 (H2 — OWASP ASVS 3.3.1 / NIST SP 800-63B §7.1):
+    // marca de revocación de sesiones al restablecer la contraseña. Se
+    // fija al INICIO del segundo actual (ms en cero), alineada al reloj
+    // del JWT: `iat` tiene resolución de 1 s truncada hacia abajo.
+    //
+    //   · Toda sesión de un segundo anterior o más viejo —incluida
+    //     cualquier sesión concurrente de la cuenta— queda revocada
+    //     (iat < marca → obtenerSesion() devuelve null → 401).
+    //   · El token que este endpoint emite A CONTINUACIÓN (inicio de
+    //     sesión automático tras restablecer) se firma en este mismo
+    //     segundo o posterior: iat >= marca, nunca se revoca a sí mismo.
+    //     Con milisegundos completos, iat*1000 (segundo truncado) sería
+    //     casi siempre menor que la marca y la sesión recién creada
+    //     nacería muerta: una regresión que este ajuste elimina.
+    //
+    // Contraste deliberado con POST /api/auth/password (marca con ms
+    // completos, fail-closed): aquí la marca se alinea al reloj del JWT
+    // porque este es el ÚNICO flujo que firma un token inmediatamente
+    // después de escribir la marca, y el orden real de emisión (token
+    // DESPUÉS del cambio) es un hecho conocido que la comparación de
+    // `iat` —por su resolución de 1 s— no puede expresar por sí sola.
+    //
+    // Se calcula ANTES de la transacción para que un reintento del
+    // envoltorio de reintentos reutilice exactamente la misma marca (la
+    // marca es monótona respecto al token, que siempre se emite después).
+    const passwordCambiadaEn = new Date();
+    passwordCambiadaEn.setMilliseconds(0);
+
     // Forma de callback (Fase 3): la forma de arreglo de $transaction no
     // puede re-ejecutarse en un reintento (las promesas ya fueron creadas),
     // y este par de escrituras — marcar el código como usado y cambiar la
@@ -97,6 +125,7 @@ export async function POST(request: Request) {
         data: {
           passwordHash: await hashearPassword(password),
           debeCambiarPassword: false,
+          passwordCambiadaEn,
         },
       });
     });
