@@ -384,7 +384,32 @@ export type FilaRestauracion = {
   totalRegistros: number;
   duracionMs: number;
   error: string | null;
+  informeDiferencias: InformeDiferencias | null;
 };
+
+/**
+ * Informe de diferencias de usuarios/roles alrededor de una restauración
+ * (TASK-STR-007, hallazgo H5): cuentas INTRODUCIDAS por el respaldo
+ * (`agregados`) y cuentas ELIMINADAS (`eliminados`), cada una con el
+ * formato legible "correo (ROL)" / "correo (ROL, INACTIVO)".
+ */
+export type InformeDiferencias = {
+  agregados: string[];
+  eliminados: string[];
+};
+
+/**
+ * Lectura resistente del informe persistido (columna Json): ante un valor
+ * ilegible o malformado devuelve null en lugar de tumbar el módulo — mismo
+ * criterio defensivo que leerRestauraciones().
+ */
+function aInformeDiferencias(valor: unknown): InformeDiferencias | null {
+  if (valor === null || typeof valor !== "object") return null;
+  const crudo = valor as Record<string, unknown>;
+  if (!Array.isArray(crudo.agregados) || !Array.isArray(crudo.eliminados)) return null;
+  const limpio = (lista: unknown[]) => lista.filter((e): e is string => typeof e === "string");
+  return { agregados: limpio(crudo.agregados), eliminados: limpio(crudo.eliminados) };
+}
 
 function aRespaldo(r: {
   id: string;
@@ -420,9 +445,11 @@ function aRestauracion(r: {
   totalRegistros: number;
   duracionMs: number;
   error: string | null;
+  informeDiferencias: unknown;
 }): FilaRestauracion {
   return {
     ...r,
+    informeDiferencias: aInformeDiferencias(r.informeDiferencias),
     tipo: r.tipo === "REVERSION" ? "REVERSION" : "RESTAURACION",
     estado:
       r.estado === "COMPLETADA" ? "COMPLETADA" : r.estado === "FALLIDA" ? "FALLIDA" : "EN_PROGRESO",
@@ -804,7 +831,58 @@ export type ResultadoRestauracion = {
     ventanaReversaHasta: string | null;
     tipo: "RESTAURACION" | "REVERSION";
   };
+  /**
+   * Diff de cuentas añadidas/eliminadas por la restauración (auditoría
+   * H5). Null cuando la restauración falló (la base no cambió: no hay
+   * diferencias que reportar).
+   */
+  informeDiferencias: InformeDiferencias | null;
 };
+
+// ============================================================
+// AUDITORÍA DE USUARIOS/ROLES (TASK-STR-007, HALLAZGO H5)
+// ============================================================
+
+/** Una fila del plantel de usuarios: correo, clave de rol y estado. */
+type FilaPlantelUsuario = { correo: string; rol: { clave: string }; activo: boolean };
+
+/**
+ * Captura el plantel de usuarios/roles (correo, clave de rol, activo) de
+ * la base VIVA. Se fotografía ANTES y DESPUÉS de cada restauración para
+ * generar el informe de diferencias (OWASP ASVS 6.2.2: la restauración
+ * es una acción suficientemente sensible como para auditar su efecto
+ * sobre el plantel de cuentas).
+ */
+async function plantelUsuarios(): Promise<FilaPlantelUsuario[]> {
+  return db.usuario.findMany({
+    select: { correo: true, rol: { select: { clave: true } }, activo: true },
+  });
+}
+
+/** Formato legible y auditable de una cuenta: "correo (ROL)" o
+ *  "correo (ROL, INACTIVO)" si la cuenta estaba desactivada. */
+function cuentaLegible(u: FilaPlantelUsuario): string {
+  return `${u.correo} (${u.rol.clave}${u.activo ? "" : ", INACTIVO"})`;
+}
+
+/**
+ * Diff del plantel de usuarios/roles alrededor de una restauración:
+ * cuentas INTRODUCIDAS por el respaldo (presentes después, ausentes
+ * antes) y cuentas ELIMINADAS (presentes antes, ausentes después). La
+ * identidad de la cuenta es el correo (único en el modelo); el rol y el
+ * estado se reportan del lado donde la cuenta existía.
+ */
+function diffPlantel(
+  usuariosPre: FilaPlantelUsuario[],
+  usuariosPost: FilaPlantelUsuario[],
+): InformeDiferencias {
+  const correosPre = new Set(usuariosPre.map((u) => u.correo));
+  const correosPost = new Set(usuariosPost.map((u) => u.correo));
+  return {
+    agregados: usuariosPost.filter((u) => !correosPre.has(u.correo)).map(cuentaLegible),
+    eliminados: usuariosPre.filter((u) => !correosPost.has(u.correo)).map(cuentaLegible),
+  };
+}
 
 /**
  * Núcleo de restauración: valida el respaldo restaurándolo a una base
@@ -852,6 +930,14 @@ async function restaurarNucleo(args: {
 
   // Columnas de llave primaria por tabla (paginación determinista).
   const llavesPorTabla = await columnasLlavePrimaria(lector);
+
+  // 3bis. Captura PRE-restauración del plantel de usuarios/roles
+  //      (auditoría H5): la fotografía contra la que se medirá qué
+  //      cuentas introduce o elimina el respaldo. Se toma inmediatamente
+  //      antes de la transacción para que el diff refleje SOLO el efecto
+  //      de la restauración (cualquier alta producida durante la fase de
+  //      verificación ya forma parte del estado «antes»).
+  const usuariosPre = await plantelUsuarios();
 
   const t0 = Date.now();
   try {
@@ -912,6 +998,8 @@ async function restaurarNucleo(args: {
         ventanaReversaHasta: null,
         tipo: args.tipo,
       },
+      // Sin diff: la base quedó intacta (rollback), no hay diferencias.
+      informeDiferencias: null,
     };
   } finally {
     // La base transitoria y su conexión se liberan SIEMPRE.
@@ -919,7 +1007,25 @@ async function restaurarNucleo(args: {
     await eliminarBaseTransitoria(baseTransitoria);
   }
 
-  // 5. Éxito: ventana de reversión de 24 h
+  // 4bis. Captura POST-restauración y diff de cuentas (auditoría H5):
+  //      qué usuarios/roles INTRODUJO o ELIMINÓ el respaldo restaurado.
+  //      Solo se llega aquí con la transacción confirmada (el camino de
+  //      fallo retornó antes, con la base intacta).
+  const usuariosPost = await plantelUsuarios();
+  const informe = diffPlantel(usuariosPre, usuariosPost);
+
+  // Advertencia temprana en el log del servidor: una restauración que
+  // INTRODUJO cuentas es la firma de un respaldo envenenado o de una
+  // escalada involuntaria de accesos (persistencia sigilosa, hallazgo
+  // H5). Además del informe persistido, la señal queda en el log para
+  // el SIEM/operador (canal de alerta fuera de la respuesta HTTP).
+  if (informe.agregados.length > 0) {
+    console.warn(`[respaldo] La restauración INTRODUJO cuentas: ${informe.agregados.join("; ")}`);
+  }
+
+  // 5. Éxito: ventana de reversión de 24 h + informe de diferencias
+  //    persistido en la bitácora (una sola actualización: el registro
+  //    nunca queda COMPLETADA sin su informe).
   const completadaEn = new Date();
   const ventana = new Date(completadaEn.getTime() + VENTANA_REVERSA_HORAS * 3600_000);
   const completada = await db.restauracionBD.update({
@@ -930,6 +1036,7 @@ async function restaurarNucleo(args: {
       ventanaReversaHasta: ventana,
       totalRegistros: total,
       duracionMs: Date.now() - t0,
+      informeDiferencias: informe,
     },
   });
 
@@ -942,6 +1049,7 @@ async function restaurarNucleo(args: {
       ventanaReversaHasta: ventana.toISOString(),
       tipo: args.tipo,
     },
+    informeDiferencias: informe,
   };
 }
 

@@ -556,6 +556,15 @@ model RestauracionBD {
   totalRegistros      Int       @default(0)
   duracionMs          Int       @default(0)
   error               String? // mensaje si estado = FALLIDA
+  /// Informe de diferencias de usuarios/roles antes y después de la
+  /// restauración (TASK-STR-007, hallazgo H5). Persiste las cuentas
+  /// añadidas o eliminadas por la restauración para auditoría:
+  /// { "agregados": ["correo (ROL)"], "eliminados": ["correo (ROL, INACTIVO)"] }.
+  /// Solo se llena en restauraciones COMPLETADAS (una restauración fallida
+  /// no toca la base: no hay diferencias que reportar).
+  /// Referencia normativa: OWASP ASVS 6.2.2 (re-autenticación para
+  /// acciones sensibles) y 7.x (registro de auditoría de cambios en cuentas).
+  informeDiferencias  Json?
 
   @@index([estado, iniciadaEn])
   @@index([reversionDeId])
