@@ -592,6 +592,16 @@ function esquemaCompatible(presentes: Set<string>): boolean {
  *   <dumpid>; <oid> <oid> TABLE <esquema> <tabla> <dueño>
  * (las entradas TABLE DATA llevan el literal «DATA» tras TABLE y se
  * descartan aquí).
+ *
+ * Se excluye `_prisma_migrations` —la bitácora interna de migraciones
+ * de Prisma, que no forma parte del modelo de datos— por SIMETRÍA con
+ * tablasEnBase (que aplica exactamente el mismo filtro al catálogo
+ * vivo): pg_dump vuelca el esquema public completo, incluida esa tabla
+ * interna, y sin esta exclusión esquemaCompatible la clasificaría como
+ * «desconocida», rechazando con RESPALDO_INCOMPATIBLE (409) el
+ * round-trip legítimo Descargar→Subir de un respaldo producido por el
+ * propio sistema (hallazgo H6 del informe de pentest). TOC y catálogo
+ * acuerdan así una única noción de «tabla de datos» (DRY).
  */
 function tablasDelTOC(salida: string): Set<string> {
   const tablas = new Set<string>();
@@ -599,7 +609,9 @@ function tablasDelTOC(salida: string): Set<string> {
     const campos = linea.trim().split(/\s+/);
     if (campos.length < 6) continue;
     if (campos[3] !== "TABLE" || campos[4] === "DATA") continue;
-    if (campos[4] === ESQUEMA_DATOS) tablas.add(campos[5]);
+    if (campos[4] === ESQUEMA_DATOS && campos[5] !== "_prisma_migrations") {
+      tablas.add(campos[5]);
+    }
   }
   return tablas;
 }
