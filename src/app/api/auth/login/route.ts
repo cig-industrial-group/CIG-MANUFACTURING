@@ -18,6 +18,8 @@ import {
 } from "@/modulos/autenticacion/servicios/auth";
 import {
   POLITICAS,
+  claveLoginCuenta,
+  claveLoginIp,
   estaBloqueada,
   ipPeticion,
   limpiar,
@@ -27,13 +29,18 @@ import {
 } from "@/modulos/autenticacion/servicios/limites";
 
 // POST /api/auth/login — Iniciar sesión con correo y contraseña
-// Protección anti-fuerza bruta: máximo 5 fallos por (IP + cuenta) y
-// 20 por IP en una ventana de 15 minutos; al agotarse se responde 429
-// con Retry-After. Un acceso correcto limpia los contadores.
+// Protección anti-fuerza bruta (TASK-STR-006 — cierre del hallazgo H3):
+//  · Clave PRINCIPAL por CUENTA (login:cta:{correo}, SIN IP): 5 fallos
+//    en 15 min → bloqueo 15 min. El 5.º fallo responde 429 EN EL ACTO;
+//    rotar X-Forwarded-For (o cambiar de red) NO evade este candado.
+//  · Clave SECUNDARIA de volumen por IP (login:ip:{ip}, 20 fallos/15 min):
+//    acota el rociado de credenciales sobre varias cuentas desde una
+//    misma IP. La IP es fail-closed (ipPeticion ignora la cabecera
+//    salvo PROXY_DE_CONFIANZA=1).
+// Un acceso correcto limpia ambos contadores.
 export async function POST(request: Request) {
   try {
-    const ip = ipPeticion(request);
-    const claveIp = `login:ip:${ip}`;
+    const claveIp = claveLoginIp(ipPeticion(request));
 
     if (estaBloqueada(claveIp)) {
       return respuestaLimite(msRestantes(claveIp));
@@ -47,7 +54,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "CAMPOS_INCOMPLETOS" }, { status: 400 });
     }
 
-    const claveCuenta = `login:cta:${ip}:${correo}`;
+    // Clave principal POR CUENTA, sin componente de IP (H3): la
+    // rotación de X-Forwarded-For no evade este bloqueo.
+    const claveCuenta = claveLoginCuenta(correo);
     if (estaBloqueada(claveCuenta)) {
       return respuestaLimite(msRestantes(claveCuenta));
     }
@@ -59,8 +68,13 @@ export async function POST(request: Request) {
 
     // Mensaje genérico para no revelar si el correo existe
     if (!usuario || !(await verificarPassword(password, usuario.passwordHash))) {
-      registrarFallo(claveCuenta, POLITICAS.login);
+      // El fallo que agota la política de cuenta responde 429 de
+      // inmediato: el atacante no recibe una respuesta 401 más.
+      const cuentaBloqueada = registrarFallo(claveCuenta, POLITICAS.login);
       registrarFallo(claveIp, POLITICAS.loginIp);
+      if (cuentaBloqueada) {
+        return respuestaLimite(msRestantes(claveCuenta));
+      }
       return NextResponse.json({ error: "CREDENCIALES_INVALIDAS" }, { status: 401 });
     }
     if (!usuario.activo) {

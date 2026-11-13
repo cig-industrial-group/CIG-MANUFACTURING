@@ -57,7 +57,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 
 function claveError(e: unknown): string {
@@ -193,8 +192,6 @@ function DialogoRecuperacion({
   const [codigo, setCodigo] = useState("");
   const [password, setPassword] = useState("");
   const [confirmacion, setConfirmacion] = useState("");
-  const [codigoDemo, setCodigoDemo] = useState<string | null>(null);
-  const [expiraMin, setExpiraMin] = useState(15);
   const [error, setError] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
 
@@ -203,9 +200,10 @@ function DialogoRecuperacion({
     setError(null);
     setEnviando(true);
     try {
-      const resp = await pedirCodigoRecuperacion(correo.trim());
-      setCodigoDemo(resp.codigo);
-      setExpiraMin(resp.expiraMinutos);
+      // TASK-STR-006: la respuesta ya no incluye el código (entrega
+      // fuera de banda por el log auditado del servidor desde
+      // TASK-STR-004); solo confirma que la solicitud fue aceptada.
+      await pedirCodigoRecuperacion(correo.trim());
       setPaso("codigo");
     } catch (err) {
       setError(t(claveError(err)));
@@ -302,21 +300,6 @@ function DialogoRecuperacion({
           </form>
         ) : (
           <form onSubmit={confirmar} className="space-y-4">
-            {codigoDemo && (
-              <Alert className="border-primary/40 bg-primary/5">
-                <AlertDescription>
-                  <span className="block text-xs text-muted-foreground">
-                    {t("auth.simulacionCorreo")}
-                  </span>
-                  <span className="mt-1 block select-all text-center text-2xl font-bold tracking-[0.4em] text-primary">
-                    {codigoDemo}
-                  </span>
-                  <span className="mt-1 block text-center text-xs text-muted-foreground">
-                    {t("auth.codigoExpira", { min: expiraMin })}
-                  </span>
-                </AlertDescription>
-              </Alert>
-            )}
             <div className="space-y-2">
               <Label htmlFor="rec-codigo">{t("auth.codigoVerificacion")}</Label>
               <Input
