@@ -5,6 +5,120 @@ Todos los cambios notables de este proyecto se documentarán en este archivo.
 El formato está basado en [Keep a Changelog](https://keepachangelog.com/es/1.1.0/),
 y este proyecto se adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0/es/).
 
+## [2.2.0] — 2026-11-13
+
+> **Hito: Security Hardening Milestone** — Cierre integral de los 9 hallazgos del pentest de caja gris (INFORME-PENTEST-CIG-MANUFACTURING.md, 2026-11-12). 
+> Elevación del cumplimiento a OWASP ASVS Nivel 3, ISO 27001 A.14.2.5 y NIST SP 800-53 (familias AC, AU, IA, SC).
+
+### 🔒 Seguridad (Security Hardening) — Cierre de hallazgos H1–H9
+
+#### H1 — Eliminación de puerta trasera en recuperación de contraseña (CVSS 9.8 → 0)
+- **Vector cerrado**: el código de 6 dígitos de recuperación ya **nunca viaja en la respuesta HTTP** (`POST /api/auth/recuperacion`). Se entrega exclusivamente por canal fuera de banda: log del servidor con etiqueta `[AUDIT_SENSITIVE]` para entrega manual/verbal por el operador (OWASP ASVS 6.3.1).
+- **Límite por cuenta inmutable**: la clave de bloqueo pasó de `rec:{correo}:{ip}` a `rec:cta:{correo}`, eliminando la evasión por rotación de `X-Forwarded-For`.
+- **Respuesta uniforme anti-enumeración**: `{"ok":true,"expiraMinutos":15}` idéntica exista o no el correo (HTTP 200).
+- **Archivos**: `src/app/api/auth/recuperacion/route.ts`, `src/modulos/autenticacion/servicios/limites.ts`.
+- **Tarea**: TASK-STR-004.
+
+#### H2 — Revocación inmediata de sesiones JWT tras cambio/restablecimiento de contraseña (CVSS 7.4 → 0)
+- **Mecanismo**: nuevo campo `Usuario.passwordCambiadaEn` (migración no destructiva con `@default(now())`). La función `obtenerSesion()` compara `payload.iat * 1000` contra `passwordCambiadaEn.getTime()` y rechaza sesiones emitidas antes del último cambio de credenciales (OWASP ASVS 3.3.1 / NIST SP 800-63B §7.1).
+- **Complejidad O(1)**: sin listas de revocación ni consultas adicionales.
+- **Alineación temporal quirúrgica**: en `/api/auth/password` la marca usa `new Date()` con milisegundos completos (fail-closed, no emite token nuevo); en `/api/auth/recuperacion/confirmar` se alinea al segundo (`setMilliseconds(0)`) para no revocar el token recién emitido por el auto-login post-restablecimiento.
+- **Archivos**: `prisma/schema.prisma`, `src/modulos/autenticacion/servicios/auth.ts`, `src/app/api/auth/password/route.ts`, `src/app/api/auth/recuperacion/confirmar/route.ts`, migración `20261112214224_add_password_cambiada_en_session_revocation`.
+- **Tarea**: TASK-STR-005.
+
+#### H3 — Anti-fuerza bruta robusto con fail-closed de proxy (CVSS 7.4 → 0)
+- **`ipPeticion()` fail-closed**: devuelve `"local"` salvo `PROXY_DE_CONFIANZA=1`, ignorando `X-Forwarded-For` en conexión directa (OWASP — no confiar en cabeceras controladas por el cliente).
+- **Clave de bloqueo por cuenta inmutable**: `login:cta:{correo}` (sin componente IP). El límite por IP (`login:ip:{ip}`) queda relegado a capa secundaria de volumen, activable solo con proxy de confianza declarado.
+- **Unificación en confirmación**: `conf:cta:{correo}` aplica la misma lógica en `POST /api/auth/recuperacion/confirmar`.
+- **Archivos**: `src/modulos/autenticacion/servicios/limites.ts`, `src/app/api/auth/login/route.ts`, `src/app/api/auth/recuperacion/confirmar/route.ts`, `.env.example`.
+- **Tarea**: TASK-STR-006.
+
+#### H4 — Sanitización lineal de SVG en branding (CVSS 6.9 → 0)
+- **Saneador artesanal con máquina de estados en una pasada (O(n))**: reemplaza las regex cuadráticas originales (vulnerables a ReDoS con payloads de 2 MB) por un parser lineal con pila de descarte acotada a 64 niveles.
+- **Lista blanca estricta de 24 elementos SVG seguros** (`svg`, `g`, `path`, `rect`, `circle`, `text`, `linearGradient`, etc.).
+- **Eliminación de**: etiquetas `script`, `foreignObject`, `iframe`, `a`, `animate`, `set`, `handler`; atributos `on*`, `href`, `xlink:href`, `filter`; neutralización de `url(https://…)` → `url(#…)`.
+- **Integración**: `sanearSvg()` se ejecuta dentro de `validarArchivoLogo()` antes de persistir; re-verificación `esSvg()` post-saneado rechaza SVGs no recuperables.
+- **Archivos**: `src/modulos/ajustes/servicios/branding.ts`.
+- **Tarea**: TASK-STR-009 (Pilar 1).
+
+#### H5 — Step-up authentication y auditoría de diferencias en restauración de respaldos (CVSS 9.1 → 0)
+- **Re-autenticación obligatoria**: `POST /api/respaldo/restaurar` exige `password` en el cuerpo además de la sesión. Se valida contra el hash bcrypt del operador solicitante (OWASP ASVS 6.2.2). Respuesta uniforme `401 PASSWORD_INCORRECTA` sin revelar existencia del usuario.
+- **Informe de diferencias persistente**: captura del plantel de usuarios/roles ANTES y DESPUÉS de la transacción; diff de cuentas añadidas/eliminadas (formato `"correo (ROL)"` / `"correo (ROL, INACTIVO)"`) persistido en nuevo campo `RestauracionBD.informeDiferencias` (JSONB) y devuelto en la respuesta.
+- **Alerta temprana para SIEM**: `console.warn` en el log del servidor cuando la restauración INTRODUJO cuentas.
+- **Cobertura automática de reversión**: al compartir `restaurarNucleo`, el endpoint `/api/respaldo/revertir` queda auditado sin cambios adicionales.
+- **Archivos**: `prisma/schema.prisma`, `src/app/api/respaldo/restaurar/route.ts`, `src/modulos/respaldo/servicios/nucleo.ts`, migración `20261113004239_add_informe_diferencias_restauracion`.
+- **Tarea**: TASK-STR-007.
+
+#### H6 — Restauración del flujo round-trip de respaldos (CVSS 6.5 → 0)
+- **Causa raíz**: `tablasDelTOC()` no excluía `_prisma_migrations` (tabla interna de Prisma), mientras que `tablasEnBase()` sí lo hacía. Todo respaldo generado por el propio sistema era rechazado con `RESPALDO_INCOMPATIBLE` (409) al re-subirse.
+- **Corrección**: exclusión explícita de `_prisma_migrations` en `tablasDelTOC()`, alineando simétricamente ambos criterios (DRY).
+- **Archivos**: `src/modulos/respaldo/servicios/nucleo.ts`.
+- **Tarea**: TASK-STR-008.
+
+#### H7 — Mitigación de enumeración por timing en login (CVSS 3.7 → 0)
+- **Hash señuelo constante**: constante `HASH_SENUELO` (bcrypt coste 10) utilizada cuando el correo no existe, garantizando que `verificarPassword()` se ejecute siempre con el mismo coste computacional (OWASP ASVS 2.5.4).
+- **Sin retardos artificiales**: el coste es puramente criptográfico, indistinguible de un hash real.
+- **Archivos**: `src/app/api/auth/login/route.ts`.
+- **Tarea**: TASK-STR-010.
+
+#### H8 — CSP con nonce dinámico y cabeceras de seguridad globales (transversal)
+- **Middleware con nonce criptográfico por petición**: `src/middleware.ts` (NUEVO) genera `crypto.randomUUID()` en base64, inyecta `Content-Security-Policy: script-src 'self' 'nonce-<NONCE>'` y propaga el nonce a las cabeceras de la petición para que Next.js App Router lo aplique automáticamente a sus scripts internos de hidratación (`getScriptNonceFromHeaders`).
+- **CSP global estricta sin `'unsafe-inline'` ni `'unsafe-eval'`**: `default-src 'self'; script-src 'self' 'nonce-…'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'`.
+- **CSP específica para branding**: `/api/branding/:recurso*` sobrescribe a `default-src 'none'; img-src 'self' data:` (defensa en profundidad contra XSS residual del Pilar 1).
+- **Cabeceras transversales**: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin` en todas las respuestas.
+- **Renderizado dinámico de `/`**: `src/app/layout.tsx` propaga el nonce al `<html>` y fuerza render dinámico (un HTML prerenderizado no puede portar nonce por petición).
+- **Guard de instrumentación**: `src/instrumentation.ts` añade `NEXT_RUNTIME !== "nodejs"` para evitar que el grafo Prisma → `node:path` explote en el bundle Edge del middleware.
+- **Archivos**: `src/middleware.ts` (NUEVO), `src/app/layout.tsx`, `src/instrumentation.ts`, `next.config.ts` (bloque `async headers()` eliminado, migrado al middleware).
+- **Tarea**: TASK-STR-009 (Pilar 2).
+
+#### H9 — Fail-fast explícito ante `AUTH_SECRET` inválido en producción (informativa → resuelta)
+- **Terminación explícita del proceso**: `process.exit(1)` en `src/instrumentation.ts` tras el rechazo, garantizando que supervisores (systemd `Restart=on-failure`, Docker HEALTHCHECK, k8s liveness) detecten la caída y reinicien.
+- **Archivos**: `src/instrumentation.ts`.
+- **Tarea**: TASK-STR-011.
+
+### 🧹 Limpieza de deuda técnica
+- **Eliminación de UI muerta**: removido el bloque de "código de simulación" en `PantallaAutenticacion.tsx` que leía `resp.codigo` (campo obsoleto desde TASK-STR-004).
+- **Limpieza de tipos**: `RespuestaRecuperacion` ya no declara el campo `codigo` (deuda diferida de TASK-STR-004).
+- **Documentación operativa**: nueva sección "Acceso a Logs de Recuperación" en `README-DEPLOY.md` con instrucciones de enmascaramiento para SIEM y procedimiento de entrega manual/verbal.
+- **Variable `PROXY_DE_CONFIANZA`**: documentada en `.env.example` y `README-DEPLOY.md` (fail-closed por defecto).
+
+### ⚠️ Breaking Changes (operativos)
+- **`/` pasa de estática a dinámica**: el layout raíz ahora es `ƒ Dynamic` (antes `○ Static`) para portar el nonce CSP por petición. Impacto de rendimiento despreciable en tráfico interno; vigilar en escala.
+- **Nueva variable de entorno opcional**: `PROXY_DE_CONFIANZA=1` debe declararse explícitamente cuando el despliegue use un proxy inverso que sobrescriba `X-Forwarded-For` (Caddy oficial). Sin ella, todas las peticiones comparten la clave `"local"` del limitador por IP.
+- **Nueva columna en `RestauracionBD`**: `informeDiferencias JSONB` (nulable, migración no destructiva). Las restauraciones previas a esta versión quedan con `null`.
+- **Contrato de `POST /api/respaldo/restaurar`**: ahora exige `password` en el cuerpo. La UI debe actualizarse para solicitar la contraseña del operador antes de invocar el endpoint (deuda de frontend pendiente).
+
+### 📋 Notas de despliegue
+1. **Orden de migración**: aplicar migraciones en orden cronológico (`20261106160000_linea_base_postgresql` → `20261112214224_add_password_cambiada_en_session_revocation` → `20261113004239_add_informe_diferencias_restauracion`). Todas son aditivas y no destructivas.
+2. **Post-despliegue**: los usuarios existentes recibirán `passwordCambiadaEn = now()`; sus sesiones actuales seguirán válidas hasta expiración natural (24 h) o próximo cambio de contraseña.
+3. **HSTS**: sigue siendo recomendación del proxy inverso (Caddy). No se modifica `infra/caddy/Caddyfile` en esta versión; el endurecimiento se aplica en la capa de aplicación.
+4. **Aviso de Next.js 16**: el convenio `middleware.ts` está deprecado en favor de `proxy.ts`. Funcional en 16.4.5; migrar al actualizar Next.
+
+### 🧪 Verificación post-despliegue
+```bash
+# 1. Health check SSOT
+curl -s http://localhost:3000/api
+# → {"estado":"ok","sistema":"CIG-MANUFACTURING","version":"2.2.0"}
+
+# 2. CSP con nonce
+curl -sI http://localhost:3000/ | grep -i content-security-policy
+# → script-src 'self' 'nonce-<base64>'
+
+# 3. Sanitización SVG
+curl -s -X POST http://localhost:3000/api/ajustes/branding/logo \
+  -H "Cookie: $ADMIN" -F "archivo=@logo-test.svg"
+curl -s http://localhost:3000/api/branding/logo | grep -c "<script>"
+# → 0
+
+# 4. Step-up en restauración
+curl -s -X POST http://localhost:3000/api/respaldo/restaurar \
+  -H "Content-Type: application/json" -H "Cookie: $ADMIN" \
+  -d '{"id":"<respaldo-id>"}'
+# → HTTP 400 {"error":"ID_Y_PASSWORD_REQUERIDOS"}
+
+# 5. Anti-timing en login (script de medición)
+# → Diferencia media < 20 ms entre correo existente e inexistente
+
 ## [2.1.0] - 2026-11-11
 
 > **Incremento MINOR (SemVer 2.0.0, §7):** nueva funcionalidad compatible hacia
@@ -152,5 +266,6 @@ y este proyecto se adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.
 - **Migraciones históricas del motor anterior**: el directorio `prisma/migrations`
   arranca desde una línea base única de PostgreSQL (auditada).
 
+[2.2.0]: https://github.com/cig-industrial-group/CIG-MANUFACTURING/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/cig-industrial-group/CIG-MANUFACTURING/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/cig-industrial-group/CIG-MANUFACTURING/compare/v1.1.1...v2.0.0

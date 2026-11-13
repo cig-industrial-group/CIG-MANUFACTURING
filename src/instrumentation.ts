@@ -16,7 +16,9 @@
  * configuración inválida ANTES de que el proceso atienda peticiones:
  *
  * · PRODUCCIÓN: AUTH_SECRET ausente/vacío/corto/known → el proceso MUERE
- *   con código ≠ 0 (docker/systemd lo reportan como arranque fallido).
+ *   EXPLÍCITAMENTE con process.exit(1) justo después de registrar la
+ *   causa por consola (docker/systemd lo reportan como arranque fallido
+ *   y lo reinician; TASK-STR-011, hallazgo H9).
  *   Nunca se imprime el valor del secreto, solo la causa y la corrección.
  *
  * · DESARROLLO: solo se avisa (el módulo de seguridad genera un secreto
@@ -62,7 +64,17 @@ export async function register(): Promise<void> {
     // Arranque de producción con secreto inválido: DETENER el proceso.
     // console.error (no incluye el valor del secreto).
     console.error(mensajeErrorAuthSecret(validacion.razon as string));
-    throw new Error("Configuración de seguridad inválida: AUTH_SECRET no es apto para producción.");
+    // TASK-STR-011 (H9): terminación EXPLÍCITA del proceso de Node.js.
+    // El `throw` anterior solo rechazaba la promesa de register(): Next.js
+    // la captura («Failed to prepare server»), el servidor HTTP SIGUE
+    // VIVO escuchando el puerto y responde 500 a TODO indefinidamente
+    // (estado «zombie»: docker/systemd ven el proceso sano y jamás lo
+    // reinician ni escalan la alerta; verificado en la evidencia de la
+    // línea base de esta tarea). process.exit(1) corta el proceso en el
+    // acto tras registrar la causa: el código de salida 1 comunica el
+    // fallo al orquestador (docker restart / systemd Restart=on-failure
+    // / CI) y libera el puerto de inmediato.
+    process.exit(1);
   } else {
     console.warn(
       `[seguridad] ${validacion.razon}. Modo desarrollo: se continuará con un secreto efímero aleatorio.`,

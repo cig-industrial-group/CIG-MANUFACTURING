@@ -3,7 +3,7 @@
 > ⚖️ **AVISO LEGAL:** Copyright © 2026 Emmanuel Caballero De La Rosa. Todos los derechos reservados.  
 > Tijuana, Baja California, México. Este proyecto es propiedad privada y confidencial. Queda prohibida su reproducción, distribución o uso no autorizado sin permiso explícito por escrito.
 
-**Versión:** 2.1.0 — la versión vive únicamente en `package.json` ([Única Fuente de Verdad](#arquitectura-de-la-versión-única-fuente-de-verdad); anteriormente: migración del motor de base de datos a **PostgreSQL 16**, requisito que sigue vigente — decisión ADR-009). Registro de cambios: [CHANGELOG.md](./CHANGELOG.md). Si actualizas desde la v1.1.1, sigue la [Guía de Migración](#guía-de-migración-desde-v111-sqlite).
+**Versión:** 2.2.0 — la versión vive únicamente en `package.json` ([Única Fuente de Verdad](#arquitectura-de-la-versión-única-fuente-de-verdad); estado actual: endurecimiento acumulado del arranque y la autenticación — fail-fast explícito ante `AUTH_SECRET` inválido en producción con `process.exit(1)` (TASK-STR-011, hallazgo H9), tiempos de login uniformes contra enumeración de cuentas (TASK-STR-010) — sobre la base **PostgreSQL 16** obligatoria, decisión ADR-009). Registro de cambios: [CHANGELOG.md](./CHANGELOG.md). Si actualizas desde la v1.1.1, sigue la [Guía de Migración](#guía-de-migración-desde-v111-sqlite).
 
 Sistema web bilingüe (Español / Inglés) para el control y la gestión de almacén de fábrica:
 inventario multi-almacén, entradas, recepción de materia prima, salidas, traslados, ajustes,
@@ -112,7 +112,12 @@ cig-manufacturing/
 
 **Seguridad del arranque:** `AUTH_SECRET` es obligatorio en producción (mínimo
 32 caracteres, generado por `setup.sh`). Si falta o es inválido, la aplicación
-**no inicia**. Ver [`.env.example`](./.env.example).
+**no inicia**: `src/instrumentation.ts` registra la causa por consola (nunca el
+valor del secreto) y **termina el proceso con `process.exit(1)` (fail-fast
+explícito, TASK-STR-011/H9)** — el servidor jamás queda «vivo» en un estado
+degradado sirviendo HTTP 500; docker/systemd ven el código de salida 1 como
+arranque fallido y lo reinician/escalan. En desarrollo solo se advierte y se
+genera un secreto efímero aleatorio. Ver [`.env.example`](./.env.example).
 
 La guía completa de despliegue de producción (Ubuntu 22.04 con `deploy.sh`, TLS vía
 Cloudflare DNS-01, systemd, Caddy, Docker, respaldos y solución de problemas) está en
@@ -189,7 +194,7 @@ Si actualizas una instalación existente de la v1.1.1:
 1. Instala y arranca **PostgreSQL 16** (en despliegues con `deploy.sh` el propio
    instalador lo aprovisiona desde PGDG; con Docker, usa el servicio
    `postgres:16-alpine` del `docker-compose.yml`).
-2. Despliega la versión actual (v2.1.0): `deploy.sh` crea rol, base y esquema
+2. Despliega la versión actual (v2.2.0): `deploy.sh` crea rol, base y esquema
    (migraciones auditables) y conserva tu `.env` en re-ejecuciones.
 3. Migra los datos del archivo de la instalación anterior:
 
