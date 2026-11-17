@@ -15,6 +15,17 @@
 #     bloque ":81" y comenta el bloque del dominio. En ese caso
 #     define COOKIE_INSEGURA_HTTP=1 en la aplicación (documentado
 #     en DESPLIEGUE.md).
+#
+# ⛔ PROHIBIDO fijar Content-Security-Policy aquí (TASK-STR-012, RF-D5):
+# la app es la ÚNICA autoridad de la CSP — emite una política con NONCE
+# CRIPTOGRÁFICO ÚNICO POR PETICIÓN desde src/middleware.ts (TASK-STR-009,
+# hallazgo H8). El proxy no puede conocer el nonce de cada respuesta y
+# cualquier CSP declarada aquí SUSTITUYE la de la app (la cabecera del
+# proxy pisa la del origen), reabriendo el XSS de scripts que el nonce
+# cierra. Hallazgo TASK-STR-012 (B-3): una CSP con 'unsafe-inline'
+# 'unsafe-eval' hallada en /etc/caddy/Caddyfile:15 provenía del
+# generador de deploy.sh, no de este archivo. No añadir
+# Content-Security-Policy en los bloques header de este archivo.
 # ============================================================
 
 cig.example.com {

@@ -23,11 +23,23 @@ import type {
 export class ErrorApiRespaldo extends Error {
   codigo: string;
   detalle: string | null;
-  constructor(codigo: string, detalle: string | null = null) {
+  /** Segundos restantes de bloqueo cuando codigo = DEMASIADOS_INTENTOS
+   *  (cabecera Retry-After del 429; null si el servidor no la envió). */
+  reintentoSeg: number | null;
+  constructor(codigo: string, detalle: string | null = null, reintentoSeg: number | null = null) {
     super(codigo);
     this.codigo = codigo;
     this.detalle = detalle;
+    this.reintentoSeg = reintentoSeg;
   }
+}
+
+/** Extrae el Retry-After (segundos) de una respuesta 429, si viene. */
+function reintentoDe(resp: Response): number | null {
+  const crudo = resp.headers.get("retry-after");
+  if (crudo === null) return null;
+  const segundos = Number(crudo);
+  return Number.isFinite(segundos) && segundos > 0 ? Math.ceil(segundos) : null;
 }
 
 async function pedir<T>(url: string, init?: RequestInit): Promise<T> {
@@ -45,7 +57,7 @@ async function pedir<T>(url: string, init?: RequestInit): Promise<T> {
     } catch {
       /* respuesta sin JSON */
     }
-    throw new ErrorApiRespaldo(codigo, detalle);
+    throw new ErrorApiRespaldo(codigo, detalle, reintentoDe(resp));
   }
   return resp.json() as Promise<T>;
 }
@@ -64,16 +76,25 @@ export const crearRespaldo = (etiqueta?: string) =>
 export const eliminarRespaldo = (id: string) =>
   pediryOk(`/api/respaldo?id=${encodeURIComponent(id)}`, { method: "DELETE" });
 
-/** Restaurar un respaldo (en caliente, con rollback automático si falla) */
-export const restaurarRespaldo = (id: string) =>
+/** Restaurar un respaldo (en caliente, con rollback automático si falla).
+ *  STEP-UP (TASK-STR-012, RF-A1): el cuerpo lleva { id, password } — la
+ *  contraseña del OPERADOR (dueño de la sesión), exigida por la ruta antes
+ *  de ejecutar la operación. La contraseña viaja solo en el cuerpo de esta
+ *  petición: el cliente jamás la persiste en estado global ni storage. */
+export const restaurarRespaldo = (id: string, password: string) =>
   pedir<ResultadoRestauracion>("/api/respaldo/restaurar", {
     method: "POST",
-    body: JSON.stringify({ id }),
+    body: JSON.stringify({ id, password }),
   });
 
-/** Revertir la última restauración dentro de su ventana de 24 h */
-export const revertirRestauracion = () =>
-  pedir<ResultadoRestauracion>("/api/respaldo/revertir", { method: "POST" });
+/** Revertir la última restauración dentro de su ventana de 24 h.
+ *  STEP-UP (RF-A1): el cuerpo lleva { password } — misma re-autenticación
+ *  que restaurar, con la misma clave de limitación step:cta. */
+export const revertirRestauracion = (password: string) =>
+  pedir<ResultadoRestauracion>("/api/respaldo/revertir", {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  });
 
 /** Respaldo automático diario (crea uno solo si procede) */
 export const respaldoAutomatico = () =>

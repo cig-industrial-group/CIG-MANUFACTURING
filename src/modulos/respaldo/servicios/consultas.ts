@@ -50,10 +50,14 @@ export function useEliminarRespaldo() {
   });
 }
 
+// STEP-UP (TASK-STR-012, RF-A1): la mutación transporta además la
+// contraseña del operador que el diálogo de confirmación recoge; la
+// firma del cliente HTTP la exige (restaurarRespaldo/revertirRestauracion).
 export function useRestaurarRespaldo() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => restaurarRespaldo(id),
+    mutationFn: ({ id, password }: { id: string; password: string }) =>
+      restaurarRespaldo(id, password),
     onSuccess: () => {
       // La base cambió por completo: invalidar TODAS las consultas
       qc.invalidateQueries();
@@ -64,7 +68,7 @@ export function useRestaurarRespaldo() {
 export function useRevertirRestauracion() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => revertirRestauracion(),
+    mutationFn: (password: string) => revertirRestauracion(password),
     onSuccess: () => {
       qc.invalidateQueries();
     },

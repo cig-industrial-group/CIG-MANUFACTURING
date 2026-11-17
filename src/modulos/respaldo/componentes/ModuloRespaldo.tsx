@@ -20,7 +20,8 @@
  *   desde el snapshot pre-restauración que se crea automáticamente.
  * · Respaldo automático diario (se dispara al abrir el módulo).
  */
-import { useEffect, useMemo, useRef, useState } from "react";import {
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
   DatabaseBackup,
   Database,
   FileUp,
@@ -31,6 +32,7 @@ import { useEffect, useMemo, useRef, useState } from "react";import {
   Archive,
   RefreshCw,
   RotateCcw,
+  ShieldAlert,
   ShieldCheck,
   Timer,
   Trash2,
@@ -108,9 +110,87 @@ function duracionLegible(segundos: number, t: (k: string) => string) {
   return `${h} h ${String(m).padStart(2, "0")} min`;
 }
 
-/** Traduce los códigos de error del servicio */
-function traducirError(e: unknown, t: (k: string) => string): string {
+// ============================================================
+// STEP-UP: cadenas bilingües propias (TASK-STR-012, RF-A3)
+// ============================================================
+// Viven en este componente (no en el diccionario compartido) porque el
+// alcance de la tarea se ciñe a los archivos del módulo de respaldo; se
+// rigen por el mismo selector de idioma del sistema (useIdioma), de modo
+// que el texto cambia al alternar ES/EN igual que el resto de la UI.
+
+/** Códigos 400/401 del step-up con mensaje específico — nunca el toast
+ *  genérico (RF-A3). DEMASIADOS_INTENTOS se traduce aparte porque interpola
+ *  el tiempo restante del bloqueo. */
+const CADENAS_STEPUP: Record<string, { es: string; en: string }> = {
+  ID_Y_PASSWORD_REQUERIDOS: {
+    es: "Falta el identificador del respaldo o tu contraseña de confirmación.",
+    en: "The backup identifier or your confirmation password is missing.",
+  },
+  PASSWORD_REQUERIDA: {
+    es: "Escribe tu contraseña para confirmar la operación.",
+    en: "Enter your password to confirm the operation.",
+  },
+  PASSWORD_INCORRECTA: {
+    es: "Contraseña incorrecta. Vuelve a intentarlo.",
+    en: "Incorrect password. Try again.",
+  },
+};
+
+/** Cadenas del informe de diferencias de cuentas (RF-A4) */
+const CADENAS_INFORME: Record<string, { es: string; en: string }> = {
+  titulo: { es: "Informe de cuentas", en: "Account report" },
+  alerta: {
+    es: "Esta operación modificó el plantel de cuentas: revisa cada entrada antes de continuar.",
+    en: "This operation changed the account roster: review every entry before continuing.",
+  },
+  agregados: { es: "Cuentas agregadas", en: "Added accounts" },
+  eliminados: { es: "Cuentas eliminadas", en: "Removed accounts" },
+  modificados: { es: "Cuentas modificadas", en: "Modified accounts" },
+  sinCambios: {
+    es: "Sin cambios en cuentas: el plantel de usuarios quedó idéntico.",
+    en: "No account changes: the user roster is unchanged.",
+  },
+};
+
+/** Cadenas del campo de contraseña del step-up (RF-A2) */
+const CADENAS_STEPUP_UI: Record<string, { es: string; en: string }> = {
+  titulo: { es: "Tu contraseña de sesión", en: "Your sign-in password" },
+  ayuda: {
+    es: "Re-autenticación obligatoria: esta operación reemplaza toda la base de datos.",
+    en: "Mandatory re-authentication: this operation replaces the entire database.",
+  },
+};
+
+/** Texto bilingüe de una clave de CADENAS_STEPUP / CADENAS_INFORME */
+function cadenaBilingue(tabla: Record<string, { es: string; en: string }>, clave: string, idioma: string) {
+  const par = tabla[clave];
+  if (!par) return clave;
+  return idioma === "en" ? par.en : par.es;
+}
+
+/** Tiempo restante de bloqueo legible: «N min» o «menos de un minuto» */
+function tiempoRestanteLegible(segundos: number | null, idioma: string) {
+  const minutos = Math.ceil((segundos && segundos > 0 ? segundos : 0) / 60);
+  if (minutos <= 0) return idioma === "en" ? "less than a minute" : "menos de un minuto";
+  return `${minutos} min`;
+}
+
+/** Traduce los códigos de error del servicio. Los códigos del step-up
+ *  (TASK-STR-012, RF-A3) tienen mensaje ESPECÍFICO y distinguible:
+ *  PROHIBIDO el toast genérico para 400 ID_Y_PASSWORD_REQUERIDOS /
+ *  PASSWORD_REQUERIDA, 401 PASSWORD_INCORRECTA, 429 DEMASIADOS_INTENTOS
+ *  (con el tiempo restante del bloqueo) y 500 RESTAURACION_FALLIDA /
+ *  REVERSION_FALLIDA (estos dos últimos vía diccionario, como siempre). */
+function traducirError(e: unknown, t: (k: string) => string, idioma: string): string {
   if (e instanceof ErrorApiRespaldo) {
+    if (e.codigo === "DEMASIADOS_INTENTOS") {
+      const plantilla =
+        idioma === "en"
+          ? "Too many failed attempts: wait {tiempo} and try again."
+          : "Demasiados intentos fallidos: espera {tiempo} e inténtalo de nuevo.";
+      return plantilla.replace("{tiempo}", tiempoRestanteLegible(e.reintentoSeg, idioma));
+    }
+    if (CADENAS_STEPUP[e.codigo]) return cadenaBilingue(CADENAS_STEPUP, e.codigo, idioma);
     const claves = [
       "RESPALDO_NO_EXISTE",
       "RESPALDO_INCOMPATIBLE",
@@ -171,8 +251,13 @@ function InsigniaTipo({ tipo }: { tipo: FilaRespaldo["tipo"] }) {
 }
 
 // ============================================================
-// DIÁLOGO: CONFIRMAR RESTAURACIÓN (escribir el nombre del archivo)
+// DIÁLOGO: CONFIRMAR RESTAURACIÓN (nombre del archivo + CONTRASEÑA)
 // ============================================================
+// STEP-UP (TASK-STR-012, RF-A2): además de escribir el nombre del
+// archivo, el operador debe teclear SU CONTRASEÑA en el mismo diálogo,
+// ANTES de que la petición salga. La contraseña vive SOLO en el estado
+// local y efímero de este diálogo (nunca en estado global ni storage) y
+// se destruye al cerrar/reabrir (el componente se remonta por `key`).
 function DialogoRestaurar({
   respaldo,
   abierto,
@@ -184,12 +269,17 @@ function DialogoRestaurar({
   abierto: boolean;
   onCerrar: () => void;
   ocupado: boolean;
-  onConfirmar: (id: string) => void;
+  onConfirmar: (id: string, password: string) => void;
 }) {
-  const { t } = useIdioma();
+  const { t, idioma } = useIdioma();
   const [texto, setTexto] = useState("");
+  const [password, setPassword] = useState("");
 
   if (!respaldo) return null;
+  // La habilitación exige el archivo exacto; la CONTRASEÑA la valida el
+  // servidor: una vacía produce el 400 específico visible en el toast
+  // (RF-A3: ID_Y_PASSWORD_REQUERIDOS traducido, nunca el genérico) y la
+  // operación jamás se ejecuta sin re-autenticación (ASVS 6.2.2).
   const confirmado = texto.trim() === respaldo.archivo;
 
   return (
@@ -230,6 +320,26 @@ function DialogoRestaurar({
                   autoComplete="off"
                 />
               </div>
+              {/* Contraseña del operador — re-autenticación (ASVS 6.2.2).
+                  Sin autocompletado y sin persistencia: estado local del
+                  diálogo que se destruye al cerrar. */}
+              <div className="space-y-2">
+                <p className="font-medium text-foreground">
+                  <ShieldAlert className="mr-1 inline h-4 w-4 text-primary" aria-hidden />
+                  {cadenaBilingue(CADENAS_STEPUP_UI, "titulo", idioma)}
+                </p>
+                <Input
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  type="password"
+                  disabled={ocupado}
+                  aria-label={cadenaBilingue(CADENAS_STEPUP_UI, "titulo", idioma)}
+                  autoComplete="off"
+                />
+                <p className="text-xs text-muted-foreground">
+                  {cadenaBilingue(CADENAS_STEPUP_UI, "ayuda", idioma)}
+                </p>
+              </div>
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -239,7 +349,7 @@ function DialogoRestaurar({
             disabled={!confirmado || ocupado}
             onClick={(e) => {
               e.preventDefault();
-              if (confirmado && !ocupado) onConfirmar(respaldo.id);
+              if (confirmado && !ocupado) onConfirmar(respaldo.id, password);
             }}
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
@@ -253,8 +363,11 @@ function DialogoRestaurar({
 }
 
 // ============================================================
-// DIÁLOGO: CONFIRMAR REVERSIÓN (escribir REVERTIR)
+// DIÁLOGO: CONFIRMAR REVERSIÓN (escribir REVERTIR + CONTRASEÑA)
 // ============================================================
+// STEP-UP (RF-A2): misma re-autenticación que restaurar, ANTES de la
+// petición. Contraseña solo en estado local del diálogo, sin
+// autocompletado, destruida al cerrar/reabrir.
 function DialogoRevertir({
   abierto,
   onCerrar,
@@ -264,12 +377,15 @@ function DialogoRevertir({
   abierto: boolean;
   onCerrar: () => void;
   ocupado: boolean;
-  onConfirmar: () => void;
+  onConfirmar: (password: string) => void;
 }) {
-  const { t } = useIdioma();
+  const { t, idioma } = useIdioma();
   const [texto, setTexto] = useState("");
+  const [password, setPassword] = useState("");
 
   const palabra = t("respaldo.palabraRevertir");
+  // La habilitación exige la palabra; la CONTRASEÑA la valida el servidor
+  // (400 PASSWORD_REQUERIDA específico y visible si va vacía — RF-A3).
   const confirmado = texto.trim().toUpperCase() === palabra.toUpperCase();
 
   return (
@@ -295,6 +411,24 @@ function DialogoRevertir({
                   autoComplete="off"
                 />
               </div>
+              {/* Contraseña del operador — re-autenticación (ASVS 6.2.2) */}
+              <div className="space-y-2">
+                <p className="font-medium text-foreground">
+                  <ShieldAlert className="mr-1 inline h-4 w-4 text-primary" aria-hidden />
+                  {cadenaBilingue(CADENAS_STEPUP_UI, "titulo", idioma)}
+                </p>
+                <Input
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  type="password"
+                  disabled={ocupado}
+                  aria-label={cadenaBilingue(CADENAS_STEPUP_UI, "titulo", idioma)}
+                  autoComplete="off"
+                />
+                <p className="text-xs text-muted-foreground">
+                  {cadenaBilingue(CADENAS_STEPUP_UI, "ayuda", idioma)}
+                </p>
+              </div>
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -304,7 +438,7 @@ function DialogoRevertir({
             disabled={!confirmado || ocupado}
             onClick={(e) => {
               e.preventDefault();
-              if (confirmado && !ocupado) onConfirmar();
+              if (confirmado && !ocupado) onConfirmar(password);
             }}
           >
             {ocupado && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
@@ -319,6 +453,10 @@ function DialogoRevertir({
 // ============================================================
 // DIÁLOGO: RESULTADO DE RESTAURACIÓN / REVERSIÓN
 // ============================================================
+// RF-A4 (TASK-STR-012): tras el éxito se MUESTRA el informeDiferencias
+// completo — cuentas agregadas, eliminadas y MODIFICADAS (rol, estado o
+// contraseña sustituida). Con agregados o mutaciones de privilegio el
+// informe lleva DISTINTIVO DE ALERTA; sin cambios se dice explícitamente.
 function DialogoResultado({
   resultado,
   onRecargar,
@@ -326,10 +464,22 @@ function DialogoResultado({
   resultado: ResultadoRestauracion | null;
   onRecargar: () => void;
 }) {
-  const { t } = useIdioma();
+  const { t, idioma } = useIdioma();
   const f = useFormateadores();
   if (!resultado) return null;
   const exito = resultado.restauracion.estado === "COMPLETADA";
+
+  // Informe de diferencias (defensivo: en éxito siempre llega; ante un
+  // null imposible se trata como plantel sin cambios).
+  const informe = resultado.informeDiferencias ?? { agregados: [], eliminados: [], modificados: [] };
+  const hayAgregados = informe.agregados.length > 0;
+  const hayEliminados = informe.eliminados.length > 0;
+  const hayModificados = informe.modificados.length > 0;
+  const sinCambios = exito && !hayAgregados && !hayEliminados && !hayModificados;
+  // Distintivo de alerta: la operación INTRODUJO cuentas o MUTÓ cuentas
+  // existentes (rol/estado/contraseña) — firma de respaldo envenenado o
+  // de escalada involuntaria de accesos (hallazgos H5/B-7).
+  const alerta = exito && (hayAgregados || hayModificados);
 
   return (
     <AlertDialog open onOpenChange={() => undefined}>
@@ -379,6 +529,75 @@ function DialogoResultado({
                       </p>
                     </div>
                   </div>
+
+                  {/* ===== Informe de diferencias de cuentas (RF-A4) ===== */}
+                  <div
+                    className={
+                      alerta
+                        ? "rounded-lg border border-amber-500/50 bg-amber-500/10 p-3"
+                        : "rounded-lg border p-3"
+                    }
+                  >
+                    <p
+                      className={
+                        "flex items-center gap-2 text-xs font-semibold uppercase tracking-wider " +
+                        (alerta ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground")
+                      }
+                    >
+                      {alerta && <ShieldAlert className="h-4 w-4" aria-hidden />}
+                      {cadenaBilingue(CADENAS_INFORME, "titulo", idioma)}
+                    </p>
+                    {alerta && (
+                      <p className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-400">
+                        {cadenaBilingue(CADENAS_INFORME, "alerta", idioma)}
+                      </p>
+                    )}
+                    {sinCambios ? (
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        {cadenaBilingue(CADENAS_INFORME, "sinCambios", idioma)}
+                      </p>
+                    ) : (
+                      <div className="mt-2 space-y-2">
+                        {hayAgregados && (
+                          <div>
+                            <p className="text-xs font-semibold text-foreground">
+                              {cadenaBilingue(CADENAS_INFORME, "agregados", idioma)}
+                            </p>
+                            <ul className="mt-0.5 list-disc space-y-0.5 pl-5 font-mono text-xs">
+                              {informe.agregados.map((cuenta) => (
+                                <li key={cuenta}>{cuenta}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {hayEliminados && (
+                          <div>
+                            <p className="text-xs font-semibold text-foreground">
+                              {cadenaBilingue(CADENAS_INFORME, "eliminados", idioma)}
+                            </p>
+                            <ul className="mt-0.5 list-disc space-y-0.5 pl-5 font-mono text-xs">
+                              {informe.eliminados.map((cuenta) => (
+                                <li key={cuenta}>{cuenta}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {hayModificados && (
+                          <div>
+                            <p className="text-xs font-semibold text-foreground">
+                              {cadenaBilingue(CADENAS_INFORME, "modificados", idioma)}
+                            </p>
+                            <ul className="mt-0.5 list-disc space-y-0.5 pl-5 font-mono text-xs">
+                              {informe.modificados.map((cuenta) => (
+                                <li key={cuenta}>{cuenta}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
                   <p>{t("respaldo.ventanaInfo")}</p>
                 </>
               ) : (
@@ -405,7 +624,7 @@ function DialogoResultado({
 // VISTA PRINCIPAL
 // ============================================================
 export function ModuloRespaldo() {
-  const { t, locale } = useIdioma();
+  const { t, locale, idioma } = useIdioma();
   const f = useFormateadores();
   const { toast } = useToast();
   const tamano = (bytes: number) => formatearTamano(locale, bytes);
@@ -461,25 +680,25 @@ export function ModuloRespaldo() {
   }, [ahora, data]);
 
   // ===== Acciones =====
-  async function confirmarRestauracion(id: string) {
+  async function confirmarRestauracion(id: string, password: string) {
     try {
-      const res = await restaurar.mutateAsync(id);
+      const res = await restaurar.mutateAsync({ id, password });
       setARestaurar(null);
       setResultado(res);
     } catch (e) {
       setARestaurar(null);
-      toast({ description: traducirError(e, t), variant: "destructive" });
+      toast({ description: traducirError(e, t, idioma), variant: "destructive" });
     }
   }
 
-  async function confirmarReversion() {
+  async function confirmarReversion(password: string) {
     try {
-      const res = await revertir.mutateAsync();
+      const res = await revertir.mutateAsync(password);
       setRevertirAbierto(false);
       setResultado(res);
     } catch (e) {
       setRevertirAbierto(false);
-      toast({ description: traducirError(e, t), variant: "destructive" });
+      toast({ description: traducirError(e, t, idioma), variant: "destructive" });
     }
   }
 
@@ -491,7 +710,7 @@ export function ModuloRespaldo() {
       await eliminar.mutateAsync(objetivo.id);
       toast({ description: t("respaldo.eliminado") });
     } catch (e) {
-      toast({ description: traducirError(e, t), variant: "destructive" });
+      toast({ description: traducirError(e, t, idioma), variant: "destructive" });
     }
   }
 
@@ -501,7 +720,7 @@ export function ModuloRespaldo() {
       setEtiqueta("");
       toast({ description: t("respaldo.creado") });
     } catch (e) {
-      toast({ description: traducirError(e, t), variant: "destructive" });
+      toast({ description: traducirError(e, t, idioma), variant: "destructive" });
     }
   }
 
@@ -521,7 +740,7 @@ export function ModuloRespaldo() {
       setARestaurar(respaldo);
       setApertura((n) => n + 1);
     } catch (e) {
-      toast({ description: traducirError(e, t), variant: "destructive" });
+      toast({ description: traducirError(e, t, idioma), variant: "destructive" });
     }
   }
 
