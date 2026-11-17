@@ -33,6 +33,18 @@
  * (cliente Prisma y verificación de conexión).
  */
 export async function register(): Promise<void> {
+  // TASK-STR-009 (H8): la instrumentación es EXCLUSIVA del runtime de
+  // Node.js. Desde que existe src/middleware.ts, Next.js empaqueta este
+  // archivo también para el runtime Edge; sin este guard, el grafo de
+  // módulos de Node (Prisma → node:path/process.cwd, en @/lib/db) se
+  // traza al bundle de instrumentación Edge y el servidor muere al
+  // arrancar («Native module not found: node:path»). El guard hace que
+  // la compilación Edge elimine estas importaciones (patrón oficial de
+  // Next.js para instrumentación multi-runtime).
+  if (process.env.NEXT_RUNTIME !== "nodejs") {
+    return;
+  }
+
   const { validarAuthSecret, esProduccion, mensajeErrorAuthSecret } = await import(
     "@/modulos/autenticacion/servicios/seguridad"
   );

@@ -10,6 +10,7 @@
 
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { headers } from "next/headers";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 
@@ -57,13 +58,21 @@ export const viewport: Viewport = {
   themeColor: "#f59e0b",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // TASK-STR-009 (H8, corrección de raíz): el middleware inyecta un nonce
+  // criptográfico por petición (cabecera x-nonce). Propagarlo al <html>
+  // hace que React/Next.js lo apliquen a los scripts del árbol — la CSP
+  // sin 'unsafe-inline' en script-src permite así la hidratación. Leer
+  // headers() fuerza además el renderizado dinámico: el HTML prerenderizado
+  // en build no podría recibir un nonce distinto en cada petición.
+  const nonce = (await headers()).get("x-nonce") ?? "";
+
   return (
-    <html lang="es" suppressHydrationWarning>
+    <html lang="es" nonce={nonce} suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
