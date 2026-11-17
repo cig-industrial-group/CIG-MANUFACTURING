@@ -65,7 +65,16 @@ export interface RespuestaLogin {
   usuario: UsuarioSesion;
 }
 
+/**
+ * Respuesta de POST /api/auth/recuperacion.
+ *
+ * Desde TASK-STR-004 el código de recuperación NUNCA viaja en la
+ * respuesta HTTP (entrega fuera de banda por el log auditado del
+ * servidor, etiqueta [AUDIT_SENSITIVE]): la respuesta es uniforme
+ * y anti-enumeración ({ ok, expiraMinutos }). El campo `codigo`
+ * heredado del prototipo se eliminó en TASK-STR-006 — la API ya
+ * no lo devuelve.
+ */
 export interface RespuestaRecuperacion {
-  codigo: string | null;
   expiraMinutos: number;
 }

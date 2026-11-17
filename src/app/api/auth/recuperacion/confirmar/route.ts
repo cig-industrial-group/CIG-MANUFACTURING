@@ -21,8 +21,8 @@ import {
 import { obtenerBanderasAuth } from "@/modulos/autenticacion/servicios/configuracion";
 import {
   POLITICAS,
+  claveConfirmacion,
   estaBloqueada,
-  ipPeticion,
   msRestantes,
   registrarFallo,
   respuestaLimite,
@@ -33,9 +33,12 @@ import {
 // Medidas aplicadas:
 //  · Sin enumeración: correo inexistente → misma respuesta CODIGO_INVALIDO
 //    que un código erróneo (el señuelo jamás está en la BD).
-//  · Máximo 5 intentos de confirmación fallidos por (correo + IP) en
+//  · Máximo 5 intentos de confirmación fallidos por CUENTA
+//    (clave conf:cta:{correo}, SIN componente de IP — TASK-STR-006) en
 //    15 minutos; con el 6.º intento se responde 429 (el código, de 6
-//    dígitos, no puede agotarse por fuerza bruta).
+//    dígitos, no puede agotarse por fuerza bruta). La rotación de la
+//    cabecera X-Forwarded-For NO evade el límite, igual que en la
+//    solicitud del código (TASK-STR-004, hallazgo H1).
 export async function POST(request: Request) {
   try {
     const banderas = await obtenerBanderasAuth();
@@ -55,7 +58,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "PASSWORD_DEBIL" }, { status: 400 });
     }
 
-    const clave = `conf:${correo}:${ipPeticion(request)}`;
+    // Límite EXCLUSIVAMENTE por cuenta (conf:cta:{correo}), sin componente
+    // de IP: la rotación de X-Forwarded-For no evade el límite.
+    const clave = claveConfirmacion(correo);
     if (estaBloqueada(clave)) {
       return respuestaLimite(msRestantes(clave));
     }

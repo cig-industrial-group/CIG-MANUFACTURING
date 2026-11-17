@@ -328,6 +328,65 @@ systemctl list-timers | grep -i logrotate  # rotación de logs activa
 - **Forzar recompilación de Caddy** (p. ej. tras cambiar de modo local a
   dominio en la misma máquina): `sudo rm /usr/local/bin/caddy && sudo ./deploy.sh`.
 
+### Acceso a Logs de Recuperación
+
+El sistema no usa SMTP: cuando un usuario solicita un código de
+recuperación (flujo habilitado en Ajustes), el código de 6 dígitos se
+entrega por un **canal fuera de banda** — el log auditado del servidor —
+y un operador lo comunica de forma **manual/verbal** al usuario. La
+respuesta HTTP nunca contiene el código (anti-enumeración, OWASP ASVS
+6.3.1).
+
+```bash
+# Código recién emitido (systemd + deploy.sh; también en journalctl):
+grep '\[AUDIT_SENSITIVE\]' /home/cig-manufacturing/CIG-MANUFACTURING/logs/stdout.log | tail
+
+# En vivo, mientras atiendes la solicitud del usuario:
+tail -f /home/cig-manufacturing/CIG-MANUFACTURING/logs/stdout.log | grep --line-buffered AUDIT_SENSITIVE
+```
+
+- Cada línea etiquetada **`[AUDIT_SENSITIVE]`** contiene el código en
+  claro (`codigo=NNNNNN`) y el correo de la cuenta: es material tan
+  sensible como una contraseña temporal. El acceso a `logs/` ya está
+  restringido al usuario de servicio; mantén el resto de rutas de
+  acceso (respaldos de logs, terminal compartida, capturas) igual de
+  restringido.
+- **El operador debe enmascarar o descartar el código** en cuanto lo
+  haya leído para entregarlo verbalmente: nunca lo copie a tickets,
+  chats, correo o capturas de pantalla, y cierre la sesión de terminal
+  donde lo mostró.
+- **El SIEM / recolector de logs centralizado debe filtrar o enmascarar**
+  las líneas `[AUDIT_SENSITIVE]` antes de almacenarlas a largo plazo.
+  Regla de enmascaramiento sugerida (regex):
+  `\[AUDIT_SENSITIVE\] codigo=\d{6}` → `[AUDIT_SENSITIVE] codigo=******`.
+  Si el SIEM no enmascara, excluya la línea completa del almacenamiento
+  persistente y conserve solo el evento (correo + marca de tiempo).
+- Mitigación ante exposición: los códigos expiran a los **15 minutos**,
+  son de un solo uso y **cada nueva solicitud invalida los anteriores**.
+  Si un código queda expuesto, pide a la cuenta afectada que solicite
+  uno nuevo (el anterior queda inservible) o espera la expiración.
+
+### Confianza del proxy y límites por IP (`PROXY_DE_CONFIANZA`)
+
+Los límites anti-fuerza bruta usan como clave principal la **cuenta**
+(`login:cta:{correo}`), no la IP: rotar direcciones no evade el bloqueo.
+La IP solo alimenta el límite secundario de volumen (`login:ip:{ip}`,
+20 fallos/15 min) y, desde TASK-STR-006, se lee en modo **fail-closed**:
+la cabecera `X-Forwarded-For` se ignora salvo que se declare
+`PROXY_DE_CONFIANZA=1` en `.env`.
+
+- El despliegue oficial (Caddy como proxy inverso que **sobrescribe**
+  `X-Forwarded-For` con la IP real del cliente) debe fijar
+  `PROXY_DE_CONFIANZA=1`; de lo contrario todas las peticiones cuentan
+  como `local`, el límite secundario agrupa a todos los clientes y
+  bloqueos legítimos pueden ocurrir si el volumen de fallos compartido
+  supera 20/15 min. Es un **requisito operativo** del despliegue tras
+  proxy, documentado también en `.env.example`.
+- NUNCA fijes `PROXY_DE_CONFIANZA=1` si la app es alcanzable directamente
+  (sin proxy) o el proxy reenvía la cabecera sin sobrescribirla: un
+  atacante podría fabricar IPs para inflar el mapa de limitación o
+  incriminar a terceros en el límite secundario.
+
 ## 10. Solución de problemas
 
 | Síntoma | Causa probable / solución |
