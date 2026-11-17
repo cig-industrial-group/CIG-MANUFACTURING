@@ -100,6 +100,30 @@ export async function verificarTokenSesion(token: string): Promise<string | null
   }
 }
 
+/**
+ * Extrae el momento de emisión (`iat`) de un token JWT en milisegundos,
+ * o null si es inválido.
+ *
+ * TASK-STR-005 (hallazgo H2 — revocación de sesiones):
+ * `payload.iat` es un NumericDate en SEGUNDOS (resolución de 1 s, propia
+ * del estándar JWT); `Date.getTime()` trabaja en MILISEGUNDOS. La
+ * conversión explícita `iat * 1000` iguala ambas unidades antes de
+ * comparar con `Usuario.passwordCambiadaEn` (RF-06).
+ *
+ * Devuelve null cuando el token no verifica o carece de `iat` numérico:
+ * el fallo de extracción NO revoca por sí solo (la validez criptográfica
+ * ya la estableció `verificarTokenSesion`); quien decida con este valor
+ * debe tratar null como "sin marca de emisión conocida".
+ */
+async function momentoEmisionToken(token: string): Promise<number | null> {
+  try {
+    const { payload } = await jwtVerify(token, secretoFirmado());
+    return typeof payload.iat === "number" ? payload.iat * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Lee el valor de una cookie desde una Request estándar */
 export function leerCookie(request: Request, nombre: string): string | null {
   const encabezado = request.headers.get("cookie");
@@ -141,7 +165,17 @@ function aUsuarioSesion(u: {
   };
 }
 
-/** Devuelve el usuario de la sesión activa (o null si no la hay / está inválida) */
+/**
+ * Devuelve el usuario de la sesión activa (o null si no la hay / está inválida).
+ *
+ * TASK-STR-005 (hallazgo H2) — Invalidación de sesiones tras cambio de
+ * contraseña (OWASP ASVS 3.3.1 / NIST SP 800-63B §7.1):
+ * toda sesión emitida ANTES del último cambio o restablecimiento de
+ * credenciales (`Usuario.passwordCambiadaEn`) queda revocada aquí, de
+ * forma O(1) y sin lista de revocación: basta comparar el `iat` del JWT
+ * contra esa marca temporal. Una cookie expropiada deja de servir en el
+ * instante en que la víctima cambia su contraseña.
+ */
 export async function obtenerSesion(request: Request): Promise<UsuarioSesion | null> {
   const token = leerCookie(request, COOKIE_SESION);
   if (!token) return null;
@@ -152,6 +186,20 @@ export async function obtenerSesion(request: Request): Promise<UsuarioSesion | n
     include: { rol: true },
   });
   if (!usuario || !usuario.activo) return null;
+
+  // --- NUEVA LÓGICA DE REVOCACIÓN (TASK-STR-005, H2) ---
+  // `iat` del JWT (segundos → milisegundos) vs. la marca del último
+  // cambio de contraseña (Prisma DateTime → .getTime() en ms). Si el
+  // token se emitió estrictamente antes, la sesión está revocada.
+  // tokenIat === null (sin iat legible) no revoca: la validez criptográfica
+  // del token ya se verificó arriba y `iat` nunca falta en los tokens
+  // que emite crearTokenSesion (setIssuedAt).
+  const tokenIat = await momentoEmisionToken(token);
+  if (tokenIat !== null && tokenIat < usuario.passwordCambiadaEn.getTime()) {
+    return null; // Sesión emitida antes del último cambio de credenciales
+  }
+  // ------------------------------------------------------
+
   return aUsuarioSesion(usuario);
 }
 

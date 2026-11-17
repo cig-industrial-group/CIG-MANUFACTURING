@@ -42,6 +42,13 @@ model Usuario {
   rolId               String
   activo              Boolean   @default(true)
   debeCambiarPassword Boolean   @default(false)
+  /// Momento del último cambio o restablecimiento de contraseña.
+  /// Toda sesión cuyo `iat` sea anterior a esta marca queda revocada
+  /// (OWASP ASVS 3.3.1 / NIST SP 800-63B §7.1 — TASK-STR-005, hallazgo H2).
+  /// El @default(now()) hace la migración NO destructiva: los usuarios
+  /// existentes reciben la marca del despliegue y conservan sus sesiones
+  /// hasta su expiración natural (24 h) o su próximo cambio de contraseña.
+  passwordCambiadaEn  DateTime  @default(now())
   ultimoAcceso        DateTime?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt

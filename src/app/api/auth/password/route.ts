@@ -40,11 +40,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "PASSWORD_INCORRECTA" }, { status: 401 });
     }
 
+    // TASK-STR-005 (H2 — OWASP ASVS 3.3.1 / NIST SP 800-63B §7.1):
+    // al cambiar la contraseña se adelanta la marca de revocación a
+    // AHORA, con milisegundos completos (fail-closed). obtenerSesion()
+    // rechazará (401) todo JWT cuyo `iat` —en segundos, truncado hacia
+    // abajo— sea estrictamente anterior a esta marca: la sesión actual y
+    // cualquier otra concurrente quedan invalidadas de inmediato, sin
+    // lista de revocación (comparación O(1) iat vs passwordCambiadaEn).
+    //
+    // Este endpoint NO emite un token nuevo (el usuario debe volver a
+    // iniciar sesión), por eso la marca NO se alinea al reloj de segundos
+    // del JWT: cualquier token preexistiente —incluso uno emitido en
+    // este mismo segundo— queda del lado revocado. El contraste con
+    // recuperacion/confirmar (que SÍ alinea la marca) está documentado
+    // allí: es el único flujo que firma un token inmediatamente después
+    // de escribir la marca.
     await db.usuario.update({
       where: { id: usuario.id },
       data: {
         passwordHash: await hashearPassword(nueva),
         debeCambiarPassword: false,
+        passwordCambiadaEn: new Date(),
       },
     });
 
