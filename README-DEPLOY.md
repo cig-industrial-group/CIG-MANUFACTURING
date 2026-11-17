@@ -30,6 +30,8 @@ el de compilar Caddy con Go).
 9. [Operación: logs, respaldos y mantenimiento](#9-operación-logs-respaldos-y-mantenimiento)
 10. [Solución de problemas](#10-solución-de-problemas)
 11. [Limitaciones y supuestos](#11-limitaciones-y-supuestos)
+12. [Modos de despliegue soportados y conmutación A ⇄ B](#12-modos-de-despliegue-soportados-y-conmutación-a--b)
+13. [Diagnóstico de un fallo de arranque del servicio](#13-diagnóstico-de-un-fallo-de-arranque-del-servicio)
 
 ---
 
@@ -168,7 +170,7 @@ sudo USE_DOMAIN=s \
 | 4 | `.env` restringido | `ls -l /home/cig-manufacturing/CIG-MANUFACTURING/.env` | `-rw-------` |
 | 5 | Servicio activo y escuchando | `systemctl is-active cig-manufacturing` y `ss -tlnp \| grep 3000` | `active` y socket LISTEN (app en `127.0.0.1:3000`; con dominio el público es Caddy en 443; en local Caddy escucha `0.0.0.0:3000`) |
 | 6 | Caddy activo con HTTPS (dominio) | `systemctl is-active caddy` y `curl -I https://<DOMAIN>` | `active` y `HTTP/2 200` |
-| 7 | Cabeceras de seguridad | `curl -sI https://<DOMAIN> \| grep -i strict-transport` | `strict-transport-security: max-age=63072000; includeSubDomains; preload` |
+| 7 | Cabeceras de seguridad | `curl -sI https://<DOMAIN> \| grep -i strict-transport` | `strict-transport-security: max-age=31536000; includeSubDomains` (TASK-STR-012, RF-D6; el proxy NO emite CSP — la app es la única autoridad, ver §12) |
 | 8 | La app responde | `curl http://127.0.0.1:3000` (dominio) o `curl http://<IP>:3000` (local) | HTML de la página de acceso |
 | 9 | Login del admin | Navegador con `admin@cig-manufacturing.com` + contraseña ingresada | Acceso exitoso + cambio forzado de contraseña |
 | 10 | Aislamiento | `sudo su - cig-manufacturing` y dentro `sudo ls /` | `sudo` rechazado (no está en sudoers) |
@@ -240,10 +242,26 @@ justificadas donde había incompatibilidades técnicas o mejoras de seguridad:
 10. **`NEXTAUTH_URL`** se escribe en el `.env` con dominio por exigencia de la
     especificación; la aplicación (autenticación JWT propia con `jose`) hoy no
     la consume — se mantiene por cumplimiento y compatibilidad futura.
-11. **Rotación de logs** (`/etc/logrotate.d/cig-manufacturing`, semanal, 8
-    rotaciones, `copytruncate` para no cortar los descriptores de systemd).
-12. **HSTS solo en modo dominio**: la cabecera no tiene efecto sobre HTTP
-    plano; en modo local se envían el resto de cabeceras de seguridad.
+11. **Rotación de logs** (`/etc/logrotate.d/cig-manufacturing`): DIARIA con
+    14 rotaciones, `compress` + `delaycompress`, `missingok`, `notifempty` y
+    `copytruncate` OBLIGATORIO (TASK-STR-012, RF-D3: el servicio escribe con
+    `StandardOutput/Error=append:` — systemd mantiene el descriptor abierto;
+    sin `copytruncate`, al rotar por renombrado el proceso seguiría escribiendo
+    al inodo renombrado). `su cig-manufacturing cig-manufacturing` para que
+    truncate y comprimidos conserven el propietario del servicio (logs/ se
+    crea con umask 077).
+12. **HSTS en AMBOS modos** (TASK-STR-012, RF-D6): `max-age=31536000;
+    includeSubDomains`. Sobre HTTP plano (modo A) la cabecera es INOPERANTE
+    por diseño del navegador —solo se honra por HTTPS— pero se envía igual
+    para que la conmutación a TLS no requiera editar el proxy. El valor se
+    fijó en 1 año sin `preload` (RF-D6): la inclusión en la lista HSTS
+    pública de Chrome es una decisión irreversible del operador, no del
+    instalador. En el proxy NO se emite Content-Security-Policy (RF-D5):
+    la app es la única autoridad de la CSP (nonce por petición desde
+    `src/middleware.ts`); una CSP en el proxy PISA la de la app y reabre el
+    XSS que el nonce cierra (hallazgo TASK-STR-012 B-3: la CSP permisiva
+    `unsafe-inline`/`unsafe-eval` detectada en `/etc/caddy/Caddyfile:15`
+    provenía del propio `deploy.sh`, no de una edición manual).
 
 ## 7. Re-ejecución, actualizaciones e idempotencia
 
@@ -394,7 +412,7 @@ la cabecera `X-Forwarded-For` se ignora salvo que se declare
 | `✖ Este script debe ejecutarse como root` | Usa `sudo ./deploy.sh`. |
 | `✖ No se encontró package.json/prisma/seed.ts` | Ejecuta desde la raíz del repositorio clonado. |
 | `✖ prisma/seed.ts no lee INITIAL_ADMIN_PASSWORD` | Tu copia del repositorio es anterior a este cambio; haz `git pull` o aplica la modificación documentada en §6.7. |
-| El servicio queda `failed` / en bucle | `journalctl -u cig-manufacturing -n 50` y `tail -50 …/logs/stderr.log`. Causa típica: `AUTH_SECRET` inválido o `.env` con `HOSTNAME`/`PORT` heredados que rompen el bind (elimina esas líneas). |
+| El servicio queda `failed` / en bucle | Desde TASK-STR-012 la unidad lleva `StartLimitIntervalSec=300` + `StartLimitBurst=5`: tras el 5.º fallo de arranque en 5 min la unidad pasa a `failed` y DEJA de reintentar (antes, con `RestartSec=10`, el límite por defecto de 5/10 s jamás disparaba y un `exit(1)` de arranque producía un bucle eterno). Diagnostica con `tail -n 50 …/logs/stderr.log` (ver §13; NO journalctl: la salida del proceso va a ficheros). Causa típica: `AUTH_SECRET` inválido o `.env` con `HOSTNAME`/`PORT` heredados que rompen el bind (elimina esas líneas). Para reintentar tras de corregir: `sudo systemctl restart cig-manufacturing`. |
 | `bun install` falla tras un proxy corporativo | El script compila con entorno limpio; configura el proxy en `/etc/apt/apt.conf.d/95proxy` para apt y reinstala Bun manualmente: `sudo -u cig-manufacturing bash -c 'export HTTPS_PROXY=…; curl -fsSL https://bun.sh/install \| bash'`. |
 | HTTPS no responde tras el despliegue (dominio) | 1) ¿El registro A del dominio apunta a esta IP? 2) ¿El token tiene `Zone·DNS·Edit` sobre esa zona? Ver `journalctl -u caddy -n 50`. El primer certificado puede tardar 1-3 min. |
 | `caddy validate` falla con token vacío | Revisa `/etc/caddy/caddy.env` (debe existir en modo dominio y contener `CLOUDFLARE_API_TOKEN=…`). |
@@ -420,6 +438,141 @@ la cabecera `X-Forwarded-For` se ignora salvo que se declare
 - Las pruebas de systemd/UFW/Caddy se documentaron para Ubuntu 22.04 LTS tal
   como pide la especificación; la lógica bash, la semilla, el build standalone
   y los artefactos generados se validaron de forma automatizada (ver §6).
+
+## 12. Modos de despliegue soportados y conmutación A ⇄ B
+
+El sistema SOPORTA DOS MODOS de despliegue por diseño (no es un defecto):
+uno para preproducción/datos sintéticos y otro para producción/datos reales.
+Conocer ambos y su conmutación es parte de la operación del sistema.
+
+### MODO A — Local/LAN sin TLS (preproducción, datos sintéticos)
+
+- `COOKIE_INSEGURA_HTTP=1` en el `.env`: la cookie de sesión se emite **sin
+  `Secure`** — **deliberado**: sobre HTTP plano el navegador nunca enviaría
+  una cookie `Secure` y el inicio de sesión sería imposible. `deploy.sh` la
+  escribe automáticamente al desplegar sin dominio.
+- `PROXY_DE_CONFIANZA=1` es **OBLIGATORIO** si hay un proxy delante (el
+  despliegue oficial siempre lo pone): sin ella, la cabecera
+  `X-Forwarded-For` se ignora (fail-closed) y el límite secundario por IP
+  agrupa a todos los clientes como «local». `deploy.sh` la fija (RF-D1).
+- **HSTS presente pero inoperante**: el proxy envía
+  `Strict-Transport-Security: max-age=31536000; includeSubDomains`, pero el
+  navegador SOLO honra esta cabecera recibida por HTTPS — sobre HTTP no tiene
+  efecto alguno.
+- **Riesgo asumido**: credenciales y cookie viajan EN CLARO en el segmento de
+  red (navegador → proxy). Aceptable **SOLO** en una red de confianza con
+  **datos no productivos** (datos sintéticos de preproducción).
+
+### MODO B — Dominio con TLS (producción, datos reales)
+
+- **Retirar `COOKIE_INSEGURA_HTTP` en AMBOS `.env`**: el de la raíz del
+  repositorio/clon (`./.env`, usado por builds y herramientas) **y** el del
+  despliegue standalone (`/home/cig-manufacturing/CIG-MANUFACTURING/.env`,
+  el que lee el servicio systemd). Si queda en cualquiera de los dos, la
+  cookie sigue emitiéndose sin `Secure`.
+- `PROXY_DE_CONFIANZA=1` **se mantiene** (el proxy sigue delante).
+- Verificar que el `Set-Cookie` incluye `Secure` y que HSTS llega al cliente
+  (comandos de verificación más abajo).
+
+### ⚠️ Fallo de conmutación más probable
+
+**Activar TLS sin retirar `COOKIE_INSEGURA_HTTP` deja la cookie sin
+`Secure`.** El sitio sirve por HTTPS, la app marca `NODE_ENV=production`…
+pero la bandera sigue presente en el `.env` y la cookie de sesión viaja sin
+el atributo `Secure` (enviable por HTTP claro a la misma URL si algo vuelve
+a exponer el puerto 80/3000). Al conmutar al modo B, revisa AMBOS `.env`
+antes de dar por buena la migración.
+
+### Conmutación A → B (de LAN a dominio con TLS)
+
+```bash
+# 1) Registro A/AAAA del dominio apuntando al servidor + token Cloudflare
+#    (ver §2). Después, re-despliegue en modo dominio:
+sudo USE_DOMAIN=s DOMAIN=app.empresa.com \
+     ADMIN_EMAIL=admin@empresa.com CF_API_TOKEN=xxxxx \
+     INITIAL_ADMIN_PASSWORD='ClaveSegura2026!' ./deploy.sh
+
+# 2) Retira COOKIE_INSEGURA_HTTP del .env del SERVICIO y reinícialo:
+sudo sed -i '/^COOKIE_INSEGURA_HTTP=/d' \
+     /home/cig-manufacturing/CIG-MANUFACTURING/.env
+sudo systemctl restart cig-manufacturing
+
+# 3) Si usabas un .env en la raíz del clon para builds, retírala ahí también:
+sed -i '/^COOKIE_INSEGURA_HTTP=/d' ./.env
+```
+
+### Conmutación B → A (volver a LAN sin TLS)
+
+```bash
+# Re-despliegue en modo local; deploy.sh vuelve a escribir
+# COOKIE_INSEGURA_HTTP=1 SOLO si el .env se genera de cero; en un .env
+# existente añádela a mano y reinicia:
+echo 'COOKIE_INSEGURA_HTTP=1' | sudo tee -a \
+     /home/cig-manufacturing/CIG-MANUFACTURING/.env
+sudo systemctl restart cig-manufacturing
+```
+
+### Comandos de verificación de ambos modos
+
+```bash
+# ── MODO A (HTTP local) ──────────────────────────────────────
+curl -sI http://<IP-del-servidor>:3000 | grep -iE 'strict-transport|x-frame|x-content-type'
+# → presentes (HSTS inoperante sobre HTTP, ver arriba)
+curl -si -X POST http://<IP-del-servidor>:3000/api/auth/login \
+     -H 'Content-Type: application/json' \
+     -d '{"correo":"admin@cig-manufacturing.com","password":"…"}' \
+     | grep -i 'set-cookie'
+# → cookie de sesión SIN Secure (deliberado en este modo)
+grep -E '^(PROXY_DE_CONFIANZA|COOKIE_INSEGURA_HTTP)=' \
+     /home/cig-manufacturing/CIG-MANUFACTURING/.env
+# → PROXY_DE_CONFIANZA=1 y COOKIE_INSEGURA_HTTP=1
+
+# ── MODO B (HTTPS con dominio) ───────────────────────────────
+curl -sI https://app.empresa.com | grep -iE 'strict-transport|x-frame|x-content-type'
+# → strict-transport-security: max-age=31536000; includeSubDomains
+curl -sI https://app.empresa.com | grep -ic 'content-security-policy' || echo "0 (correcto: la CSP la emite la app, no el proxy)"
+curl -si -X POST https://app.empresa.com/api/auth/login \
+     -H 'Content-Type: application/json' \
+     -d '{"correo":"admin@cig-manufacturing.com","password":"…"}' \
+     | grep -i 'set-cookie'
+# → cookie de sesión CON Secure
+sudo grep -c '^COOKIE_INSEGURA_HTTP=' \
+     /home/cig-manufacturing/CIG-MANUFACTURING/.env || echo "0 (correcto: retirada)"
+```
+
+## 13. Diagnóstico de un fallo de arranque del servicio
+
+**El stdout/stderr del proceso NO van a journalctl**: la unidad usa
+`StandardOutput=append:` / `StandardError=append:` hacia ficheros (§6.2).
+`journalctl -u cig-manufacturing` solo muestra los eventos del PROPIO
+systemd (inicios/paradas, límites de arranque) — para saber POR QUÉ no
+arrancó la app, el fichero correcto es:
+
+```bash
+# Errores de arranque de la aplicación (fail-fast de BD, AUTH_SECRET, bind):
+tail -n 50 /home/cig-manufacturing/CIG-MANUFACTURING/logs/stderr.log
+# Salida normal del servidor (arranque, avisos de COOKIE_INSEGURA_HTTP):
+tail -n 50 /home/cig-manufacturing/CIG-MANUFACTURING/logs/stdout.log
+
+# Estado terminal de systemd (¿quedó "failed" por el límite de arranque?):
+systemctl status cig-manufacturing
+# (StartLimitIntervalSec=300 + StartLimitBurst=5: tras 5 fallos en 5 min
+#  la unidad DEJA de reintentar — ver §10. Reiniciarla tras corregir:
+#  sudo systemctl restart cig-manufacturing)
+
+# journalctl SOLO para eventos del propio systemd alrededor del servicio:
+journalctl -u cig-manufacturing -n 20 --no-pager
+```
+
+Causas típicas de arranque fallido (en orden de frecuencia):
+
+1. `AUTH_SECRET` ausente/inválido en el `.env` (la app no inicia en
+   producción: fail-fast de `instrumentation.ts`).
+2. PostgreSQL aún no acepta conexiones (arranque en frío simultáneo;
+   la unidad ya ordena `After/Wants=postgresql.service`).
+3. `.env` con `HOSTNAME`/`PORT` heredados que rompen el bind de
+   127.0.0.1 (elimina esas líneas: la unidad los fija).
+4. Restos de un `.env` del motor de archivo anterior (migrar primero, §8).
 
 ---
 

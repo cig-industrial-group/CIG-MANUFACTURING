@@ -669,6 +669,11 @@ generar_env() {
         "${PG_USUARIO}" "${clave_bd}" "${PG_HOST}" "${PG_PUERTO}" "${PG_BASE}"
       printf 'DATA_DIR=%s/db\n' "${APP_DIR}"
       printf 'INITIAL_ADMIN_PASSWORD="%s"\n' "${INITIAL_ADMIN_PASSWORD}"
+      # RF-D1 (TASK-STR-012): este despliegue SIEMPRE pone el proxy oficial
+      # (Caddy) delante de la app y SOBRESCRIBE X-Forwarded-For con la IP
+      # real del cliente: la app debe honrar la cabecera para los límites
+      # secundarios por IP (fail-closed en ipPeticion, ver limites.ts).
+      printf 'PROXY_DE_CONFIANZA=1\n'
       if [[ "${USE_DOMAIN}" == "s" ]]; then
         printf 'NEXTAUTH_URL="https://%s"\n' "${DOMAIN}"
       else
@@ -680,6 +685,17 @@ generar_env() {
 
     ok ".env generado (AUTH_SECRET aleatorio de 64 caracteres + DATABASE_URL de PostgreSQL y DATA_DIR)"
     unset clave_bd
+  fi
+
+  # RF-D1 (TASK-STR-012) — idempotente para .env EXISTENTES: el despliegue
+  # oficial aprovisiona el proxy, así que la clave debe existir; si ya está
+  # definida (cualquier valor, incluido 0 por decisión del operador) se
+  # CONSERVA tal cual y si falta se AÑADE sin duplicar la línea.
+  if ! grep -qE '^PROXY_DE_CONFIANZA=' "${APP_DIR}/.env"; then
+    printf 'PROXY_DE_CONFIANZA=1\n' >> "${APP_DIR}/.env"
+    ok "PROXY_DE_CONFIANZA=1 añadido al .env existente (proxy oficial delante)"
+  else
+    ok "PROXY_DE_CONFIANZA ya definido en el .env — se conserva su valor"
   fi
 
   chown "${SERVICE_USER}:${SERVICE_GROUP}" "${APP_DIR}/.env"
@@ -828,6 +844,19 @@ Description=CIG Manufacturing Production Service
 # BD termina de aceptar conexiones.
 After=network.target postgresql.service
 Wants=postgresql.service
+# ── LÍMITE DE ARRANQUE (TASK-STR-012, RF-D2 — cierre del bucle eterno) ──
+# Aritmética del problema: Restart=always con RestartSec=10 hace
+# IMPOSIBLE que el límite POR DEFECTO de systemd (StartLimitBurst=5
+# arranques dentro de StartLimitIntervalSec=10 s) dispare: con 10 s
+# entre arranques jamás se acumulan 5 en una ventana de 10 s. El exit(1)
+# del fail-fast de BD (TASK-STR-011, H9) producía así un BUCLE ETERNO de
+# reinicios a ~6/min sin que la unidad pasara nunca a "failed".
+# Con 5 arranques permitidos en 300 s: tras el 5.º fallo en la ventana
+# la unidad queda "failed" y DEJA de reintentar — estado terminal
+# visible (systemctl status, monitores) que exige intervención del
+# operador (ver logs/stderr.log, README-DEPLOY §10).
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -958,6 +987,17 @@ escribir_caddyfile() {
 # CIG-MANUFACTURING — Proxy inverso con TLS automático (DNS-01)
 # Generado por deploy.sh — NO editar a mano (se regenera).
 # Reto DNS-01: no requiere abrir el puerto 80.
+#
+# ⛔ PROHIBIDO fijar Content-Security-Policy en este proxy
+# (TASK-STR-012, RF-D5): la app es la ÚNICA autoridad de la CSP.
+# Emite una política con NONCE CRIPTOGRÁFICO ÚNICO POR PETICIÓN desde
+# src/middleware.ts (TASK-STR-009, hallazgo H8): el proxy NO puede
+# conocer el nonce de cada respuesta, y cualquier CSP aquí SUSTITUYE
+# la de la app (la cabecera del proxy pisa la del origen). Hallazgo
+# TASK-STR-012 (B-3): se detectó en producción una CSP con
+# 'unsafe-inline' 'unsafe-eval' en /etc/caddy/Caddyfile:15 emitida por
+# este generador — reabría el XSS de scripts que el nonce cierra.
+# No añadir Content-Security-Policy en el bloque header.
 # ============================================================
 ${DOMAIN} {
     tls {
@@ -965,12 +1005,16 @@ ${DOMAIN} {
     }
 
     header {
-        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        # HSTS (RF-D6, TASK-STR-012): max-age=31536000 (1 año) +
+        # includeSubDomains. Solo tiene EFECTO sobre HTTPS: el navegador
+        # la recuerda y exige TLS para el dominio y sus subdominios en
+        # las visitas futuras. Nunca se envía con preload para dejar a
+        # criterio del operador la inclusión en la lista HSTS pública.
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
         X-Frame-Options "DENY"
         X-Content-Type-Options "nosniff"
         Referrer-Policy "strict-origin-when-cross-origin"
         Permissions-Policy "geolocation=(), microphone=(), camera=()"
-        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self';"
         -Server
         -X-Powered-By
     }
@@ -994,16 +1038,32 @@ EOF
 # Generado por deploy.sh — NO editar a mano (se regenera).
 # Caddy publica :3000 y lo pasa a la app en 127.0.0.1:${APP_PORT}
 # (dos sockets no pueden convivir en el mismo puerto).
+#
+# ⛔ PROHIBIDO fijar Content-Security-Policy en este proxy
+# (TASK-STR-012, RF-D5): la app es la ÚNICA autoridad de la CSP.
+# Emite una política con NONCE CRIPTOGRÁFICO ÚNICO POR PETICIÓN desde
+# src/middleware.ts (TASK-STR-009, hallazgo H8): el proxy NO puede
+# conocer el nonce de cada respuesta, y cualquier CSP aquí SUSTITUYE
+# la de la app (la cabecera del proxy pisa la del origen). Hallazgo
+# TASK-STR-012 (B-3): la CSP permisiva con 'unsafe-inline'
+# 'unsafe-eval' detectada en /etc/caddy/Caddyfile:15 provenía de ESTE
+# generador (rama sin dominio) — reabría el XSS que el nonce cierra.
+# No añadir Content-Security-Policy en el bloque header.
 # ============================================================
 :3000 {
     reverse_proxy 127.0.0.1:${APP_PORT}
 
     header {
+        # HSTS (RF-D6, TASK-STR-012): mismo valor que en modo dominio.
+        # Sobre HTTP plano es INOPERANTE (el navegador solo la honra por
+        # HTTPS), pero se envía igualmente para que la conmutación de
+        # modo (HTTP→HTTPS) no requiera editar el proxy: en cuanto el
+        # sitio se sirva por TLS, la política ya está viajando.
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
         X-Frame-Options "DENY"
         X-Content-Type-Options "nosniff"
         Referrer-Policy "strict-origin-when-cross-origin"
         Permissions-Policy "geolocation=(), microphone=(), camera=()"
-        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self';"
         -Server
         -X-Powered-By
     }
@@ -1018,21 +1078,32 @@ EOF
 }
 
 # ------------------------------------------------------------ LOGROTATE
+# RF-D3 (TASK-STR-012): rotación DIARIA con 14 copias de los logs de la
+# app (logs/*.log). $1 = directorio de salida (para pruebas/evidencias).
 escribir_logrotate() {
-  cat > "/etc/logrotate.d/${APP_SERVICE}" <<EOF
+  local destino_dir="$1"
+  cat > "${destino_dir}/${APP_SERVICE}" <<EOF
 # Rotación de logs de CIG-MANUFACTURING (generado por deploy.sh)
-# copytruncate: systemd mantiene abierto el descriptor de archivo.
+# copytruncate es OBLIGATORIO: el servicio escribe con
+# StandardOutput=append:/StandardError=append: (systemd mantiene el
+# descriptor de archivo ABIERTO sobre logs/stdout.log y logs/stderr.log);
+# sin copytruncate, al rotar por renombrado el proceso seguiría
+# escribiendo al inodo renombrado y el archivo nuevo quedaría vacío.
+# su: logs/ pertenece al usuario de servicio (umask 077); la rotación
+# corre como ese usuario para que truncate y los comprimidos conserven
+# un propietario/permisos coherentes con el servicio.
 ${APP_DIR}/logs/*.log {
-    weekly
-    rotate 8
+    daily
+    rotate 14
     compress
     delaycompress
     missingok
     notifempty
     copytruncate
+    su ${SERVICE_USER} ${SERVICE_GROUP}
 }
 EOF
-  chmod 644 "/etc/logrotate.d/${APP_SERVICE}"
+  chmod 644 "${destino_dir}/${APP_SERVICE}"
 }
 
 # ----------------------------------------------------------- ARRANQUE
@@ -1042,7 +1113,7 @@ arrancar_servicios() {
   escribir_unit_app /etc/systemd/system
   escribir_unit_caddy /etc/systemd/system
   escribir_caddyfile "${CADDY_CONF_DIR}"
-  escribir_logrotate
+  escribir_logrotate /etc/logrotate.d
 
   # Validar el Caddyfile antes de reiniciar (con el token inyectado en un
   # subshell para no dejarlo en el entorno del script).

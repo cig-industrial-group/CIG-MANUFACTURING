@@ -87,6 +87,10 @@ export const POLITICAS = {
   /** Confirmación de código: 5 intentos fallidos por CUENTA (clave
    *  conf:cta:{correo}, sin IP — TASK-STR-006). */
   confirmacion: { maxFallos: 5, ventanaMs: 15 * 60 * 1000, bloqueoMs: 15 * 60 * 1000 },
+  /** Step-up de restauración/reversión de respaldo (TASK-STR-012, B-2):
+   *  5 fallos en 15 min → bloqueo 15 min, por CUENTA (clave
+   *  step:cta:{correo}, ver claveStepUp). */
+  stepUp: { maxFallos: 5, ventanaMs: 15 * 60 * 1000, bloqueoMs: 15 * 60 * 1000 },
   /** Autoregistro: 5 cuentas por IP por hora. */
   registro: { maxFallos: 5, ventanaMs: 60 * 60 * 1000, bloqueoMs: 60 * 60 * 1000 },
 } as const satisfies Record<string, PoliticaLimite>;
@@ -150,6 +154,27 @@ export function claveLoginIp(ip: string): string {
  */
 export function claveConfirmacion(correo: string): string {
   return `conf:cta:${correo}`;
+}
+
+/**
+ * Clave de límite del STEP-UP de restauración/reversión de respaldo
+ * (TASK-STR-012, bloques B-2/B-2b/B-2c — OWASP ASVS 6.2.2): la
+ * re-autenticación con contraseña que exigen ambas rutas antes de
+ * ejecutar la operación. Clave DEDICADA por cuenta, step:cta:{correo},
+ * SIN componente de IP y SIN compartir clave con login:cta:{correo}:
+ * 5 fallos de restauración NO deben bloquear el login legítimo del
+ * operador (y viceversa: el candado de login no ventilea el step-up).
+ * La MISMA clave sirve a restaurar y revertir (una sola política por
+ * cuenta para re-autenticaciones sensibles). El correo debe llegar ya
+ * normalizado en minúsculas.
+ *
+ * Contrapartida asumida (igual que en el login): un atacante con la
+ * sesión de un operador puede agotar con 5 fallos su cupo de step-up
+ * durante el enfriamiento (15 min) — un simple DoS de esa operación,
+ * sin efecto sobre el inicio de sesión ni sobre el resto del sistema.
+ */
+export function claveStepUp(correo: string): string {
+  return `step:cta:${correo}`;
 }
 
 /**

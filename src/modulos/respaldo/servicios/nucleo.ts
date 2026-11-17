@@ -389,26 +389,42 @@ export type FilaRestauracion = {
 
 /**
  * Informe de diferencias de usuarios/roles alrededor de una restauración
- * (TASK-STR-007, hallazgo H5): cuentas INTRODUCIDAS por el respaldo
- * (`agregados`) y cuentas ELIMINADAS (`eliminados`), cada una con el
- * formato legible "correo (ROL)" / "correo (ROL, INACTIVO)".
+ * (TASK-STR-007, hallazgo H5; ampliado en TASK-STR-012, hallazgo B-7):
+ * cuentas INTRODUCIDAS por el respaldo (`agregados`), cuentas ELIMINADAS
+ * (`eliminados`) y cuentas MUTADAS (`modificados` — presentes antes y
+ * después cuyo rol, estado activo o CONTRASEÑA cambió). Cada entrada
+ * tiene el formato legible "correo (ROL)" / "correo (ROL, INACTIVO)" y,
+ * en modificados, "correo (OPERADOR → ADMIN)" / "correo (INACTIVO →
+ * ACTIVO)" / "correo (contraseña sustituida)" — acumulables en una
+ * entrada. Nunca contiene el passwordHash: solo la etiqueta booleana
+ * «contraseña sustituida» (RF-B3).
  */
 export type InformeDiferencias = {
   agregados: string[];
   eliminados: string[];
+  modificados: string[];
 };
 
 /**
  * Lectura resistente del informe persistido (columna Json): ante un valor
  * ilegible o malformado devuelve null en lugar de tumbar el módulo — mismo
  * criterio defensivo que leerRestauraciones().
+ *
+ * COMPATIBILIDAD HACIA ATRÁS (TASK-STR-012, RF-B5): los registros
+ * históricos anteriores a `modificados` (TASK-STR-007/008) se leen con
+ * esa clave como LISTA VACÍA — sin migración de Prisma y sin romper
+ * aInformeDiferencias() ni la UI.
  */
 function aInformeDiferencias(valor: unknown): InformeDiferencias | null {
   if (valor === null || typeof valor !== "object") return null;
   const crudo = valor as Record<string, unknown>;
   if (!Array.isArray(crudo.agregados) || !Array.isArray(crudo.eliminados)) return null;
   const limpio = (lista: unknown[]) => lista.filter((e): e is string => typeof e === "string");
-  return { agregados: limpio(crudo.agregados), eliminados: limpio(crudo.eliminados) };
+  return {
+    agregados: limpio(crudo.agregados),
+    eliminados: limpio(crudo.eliminados),
+    modificados: Array.isArray(crudo.modificados) ? limpio(crudo.modificados) : [],
+  };
 }
 
 function aRespaldo(r: {
@@ -852,22 +868,39 @@ export type ResultadoRestauracion = {
 };
 
 // ============================================================
-// AUDITORÍA DE USUARIOS/ROLES (TASK-STR-007, HALLAZGO H5)
+// AUDITORÍA DE USUARIOS/ROLES (TASK-STR-007 H5 + TASK-STR-012 B-7)
 // ============================================================
 
-/** Una fila del plantel de usuarios: correo, clave de rol y estado. */
-type FilaPlantelUsuario = { correo: string; rol: { clave: string }; activo: boolean };
+/**
+ * Una fila del plantel de usuarios: correo, clave de rol, estado y —desde
+ * TASK-STR-012 (RF-B1)— el passwordHash, EXCLUSIVAMENTE para comparación
+ * interna de mutaciones (¿sustituyó el respaldo la contraseña de una
+ * cuenta existente?). El hash NUNCA sale de este módulo: no se persiste,
+ * no viaja en respuestas HTTP ni llega a ningún log — del informe solo
+ * sale la etiqueta booleana «contraseña sustituida» (RF-B3).
+ */
+type FilaPlantelUsuario = {
+  correo: string;
+  rol: { clave: string };
+  activo: boolean;
+  passwordHash: string;
+};
 
 /**
- * Captura el plantel de usuarios/roles (correo, clave de rol, activo) de
- * la base VIVA. Se fotografía ANTES y DESPUÉS de cada restauración para
- * generar el informe de diferencias (OWASP ASVS 6.2.2: la restauración
- * es una acción suficientemente sensible como para auditar su efecto
- * sobre el plantel de cuentas).
+ * Captura el plantel de usuarios/roles (correo, clave de rol, activo y
+ * passwordHash) de la base VIVA. Se fotografía ANTES y DESPUÉS de cada
+ * restauración para generar el informe de diferencias (OWASP ASVS 6.2.2:
+ * la restauración es una acción suficientemente sensible como para
+ * auditar su efecto sobre el plantel de cuentas).
  */
 async function plantelUsuarios(): Promise<FilaPlantelUsuario[]> {
   return db.usuario.findMany({
-    select: { correo: true, rol: { select: { clave: true } }, activo: true },
+    select: {
+      correo: true,
+      rol: { select: { clave: true } },
+      activo: true,
+      passwordHash: true,
+    },
   });
 }
 
@@ -879,21 +912,99 @@ function cuentaLegible(u: FilaPlantelUsuario): string {
 
 /**
  * Diff del plantel de usuarios/roles alrededor de una restauración:
- * cuentas INTRODUCIDAS por el respaldo (presentes después, ausentes
- * antes) y cuentas ELIMINADAS (presentes antes, ausentes después). La
- * identidad de la cuenta es el correo (único en el modelo); el rol y el
- * estado se reportan del lado donde la cuenta existía.
+ *
+ *  · agregados  — cuentas INTRODUCIDAS por el respaldo (presentes
+ *    después, ausentes antes), con el rol/estado del lado «después».
+ *  · eliminados — cuentas ELIMINADAS (presentes antes, ausentes después).
+ *  · modificados (TASK-STR-012, RF-B2 — cierre de la variante sigilosa
+ *    de H5) — cuentas presentes ANTES Y DESPUÉS cuyo rol, estado activo
+ *    o passwordHash cambió. La identidad de la cuenta es el correo
+ *    (único en el modelo); por eso una cuenta eliminada y otra creada
+ *    con el MISMO correo cae aquí como sustitución (el hash bcrypt de
+ *    una cuenta recreada siempre difiere: lleva sal aleatoria), no en
+ *    agregados/eliminados.
+ *
+ * Formato legible de cada entrada de `modificados` (acumula los cambios
+ * de la cuenta en una sola entrada):
+ *   "correo (OPERADOR → ADMIN)"          — cambio de rol
+ *   "correo (INACTIVO → ACTIVO)"         — reactivación/desactivación
+ *   "correo (contraseña sustituida)"     — passwordHash distinto
+ *
+ * MAPEO EXPLÍCITO ANTI-FUGA (RF-B3): esta función construye el informe
+ * ÚNICAMENTE a partir de correos, claves de rol, estados y la ETIQUETA
+ * «contraseña sustituida». El passwordHash se compara (===) y se
+ * descarta: jamás —ni fragmento, prefijo o hash del hash— entra en el
+ * objeto devuelto, que es lo único que se persiste, se responde y se
+ * registra.
  */
 function diffPlantel(
   usuariosPre: FilaPlantelUsuario[],
   usuariosPost: FilaPlantelUsuario[],
 ): InformeDiferencias {
-  const correosPre = new Set(usuariosPre.map((u) => u.correo));
-  const correosPost = new Set(usuariosPost.map((u) => u.correo));
-  return {
-    agregados: usuariosPost.filter((u) => !correosPre.has(u.correo)).map(cuentaLegible),
-    eliminados: usuariosPre.filter((u) => !correosPost.has(u.correo)).map(cuentaLegible),
-  };
+  const prePorCorreo = new Map(usuariosPre.map((u) => [u.correo, u]));
+  const postPorCorreo = new Map(usuariosPost.map((u) => [u.correo, u]));
+
+  const agregados = usuariosPost.filter((u) => !prePorCorreo.has(u.correo)).map(cuentaLegible);
+  const eliminados = usuariosPre.filter((u) => !postPorCorreo.has(u.correo)).map(cuentaLegible);
+
+  const modificados: string[] = [];
+  for (const despues of usuariosPost) {
+    const antes = prePorCorreo.get(despues.correo);
+    if (!antes) continue; // cuenta nueva: ya está en agregados
+    const cambios: string[] = [];
+    if (antes.rol.clave !== despues.rol.clave) {
+      cambios.push(`${antes.rol.clave} → ${despues.rol.clave}`);
+    }
+    if (antes.activo !== despues.activo) {
+      cambios.push(`${antes.activo ? "ACTIVO" : "INACTIVO"} → ${despues.activo ? "ACTIVO" : "INACTIVO"}`);
+    }
+    // Comparación interna del hash: solo produce la ETIQUETA booleana.
+    if (antes.passwordHash !== despues.passwordHash) {
+      cambios.push("contraseña sustituida");
+    }
+    if (cambios.length > 0) {
+      modificados.push(`${despues.correo} (${cambios.join(", ")})`);
+    }
+  }
+
+  return { agregados, eliminados, modificados };
+}
+
+/** Roles con privilegio de administración del sistema (claves de prisma/seed.ts) */
+const ROLES_PRIVILEGIADOS = new Set(["ADMIN", "TI"]);
+
+/**
+ * Señal de alerta para el SIEM (TASK-STR-012, RF-B4): mutaciones de
+ * cuentas EXISTENTES que elevan el riesgo — escalada de privilegio (rol
+ * → ADMIN/TI), reactivación de cuenta o sustitución de contraseña.
+ * Devuelve etiquetas legibles SIN secretos (el passwordHash jamás se
+ * serializa: aquí solo se compara). Se emite por console.warn además del
+ * informe persistido, como canal de alerta fuera de la respuesta HTTP.
+ */
+function alertasMutacion(usuariosPre: FilaPlantelUsuario[], usuariosPost: FilaPlantelUsuario[]): string[] {
+  const prePorCorreo = new Map(usuariosPre.map((u) => [u.correo, u]));
+  const alertas: string[] = [];
+  for (const despues of usuariosPost) {
+    const antes = prePorCorreo.get(despues.correo);
+    if (!antes) continue;
+    const motivos: string[] = [];
+    if (
+      antes.rol.clave !== despues.rol.clave &&
+      ROLES_PRIVILEGIADOS.has(despues.rol.clave)
+    ) {
+      motivos.push(`escalada de privilegio (${antes.rol.clave} → ${despues.rol.clave})`);
+    }
+    if (!antes.activo && despues.activo) {
+      motivos.push("reactivación de cuenta");
+    }
+    if (antes.passwordHash !== despues.passwordHash) {
+      motivos.push("contraseña sustituida");
+    }
+    if (motivos.length > 0) {
+      alertas.push(`${despues.correo}: ${motivos.join(", ")}`);
+    }
+  }
+  return alertas;
 }
 
 /**
@@ -1019,10 +1130,11 @@ async function restaurarNucleo(args: {
     await eliminarBaseTransitoria(baseTransitoria);
   }
 
-  // 4bis. Captura POST-restauración y diff de cuentas (auditoría H5):
-  //      qué usuarios/roles INTRODUJO o ELIMINÓ el respaldo restaurado.
-  //      Solo se llega aquí con la transacción confirmada (el camino de
-  //      fallo retornó antes, con la base intacta).
+  // 4bis. Captura POST-restauración y diff de cuentas (auditoría H5 +
+  //      B-7): qué usuarios/roles INTRODUJO, ELIMINÓ o MUTÓ (rol, estado,
+  //      contraseña) el respaldo restaurado. Solo se llega aquí con la
+  //      transacción confirmada (el camino de fallo retornó antes, con
+  //      la base intacta).
   const usuariosPost = await plantelUsuarios();
   const informe = diffPlantel(usuariosPre, usuariosPost);
 
@@ -1033,6 +1145,19 @@ async function restaurarNucleo(args: {
   // el SIEM/operador (canal de alerta fuera de la respuesta HTTP).
   if (informe.agregados.length > 0) {
     console.warn(`[respaldo] La restauración INTRODUJO cuentas: ${informe.agregados.join("; ")}`);
+  }
+
+  // Señal SIEM de MUTACIONES de cuentas existentes (TASK-STR-012, RF-B4):
+  // escalada de privilegio (rol → ADMIN/TI), reactivación de cuenta o
+  // sustitución de contraseña — la variante SIGILOSA de H5 (B-7): el
+  // plantel no gana ni pierde cuentas, pero una cuenta existente amanece
+  // con más privilegios o con otra contraseña. Solo etiquetas, sin
+  // secretos (el passwordHash se compara, jamás se registra).
+  const mutaciones = alertasMutacion(usuariosPre, usuariosPost);
+  if (mutaciones.length > 0) {
+    console.warn(
+      `[respaldo] MUTACIÓN de cuentas existentes (señal SIEM): ${mutaciones.join("; ")}`,
+    );
   }
 
   // 5. Éxito: ventana de reversión de 24 h + informe de diferencias
