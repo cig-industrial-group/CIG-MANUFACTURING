@@ -324,12 +324,12 @@ export async function eliminarUnidad(id: string): Promise<{ codigo: string }> {
 // EMPAQUE POR PRODUCTO (validación compartida)
 // ============================================================
 
-/** Configuración de empaque de un producto, tal como se recibe del cliente */
+/** Configuración de empaque de un producto (validada, lista para persistir) */
 export interface EmpaqueProducto {
   /** código de la unidad de paquete del catálogo (PAQ, CJA...); null = sin empaque */
   unidadPaquete: string | null;
-  /** unidades base que contiene cada paquete ("10"; decimal exacto) */
-  contenidoPaquete: string | null;
+  /** unidades base que contiene cada paquete; Decimal exacto (ADR-010: NUMERIC) */
+  contenidoPaquete: Decimal | null;
 }
 
 /**
@@ -367,7 +367,8 @@ export async function validarEmpaqueProducto(
     throw new ErrorNegocio("PAQUETE_CONTENIDO_INVALIDO", 400);
   }
 
-  return { unidadPaquete: unidad.codigo, contenidoPaquete: contenido.toString() };
+  // ADR-010: persistencia Decimal directa (columna NUMERIC).
+  return { unidadPaquete: unidad.codigo, contenidoPaquete: contenido };
 }
 
 /**
@@ -424,7 +425,8 @@ export async function resolverConteoTx(
   producto: {
     unidad: string;
     unidadPaquete: string | null;
-    contenidoPaquete: string | null;
+    /** ADR-010: la fila del producto llega con NUMERIC (Prisma.Decimal) */
+    contenidoPaquete: Decimal | null;
   },
   captura: CapturaConteo | null | undefined,
 ): Promise<{ cantidad: Decimal; partes: ParteConteo[] } | null> {
@@ -520,13 +522,16 @@ export function fusionarPartesConteo(partes: ParteConteo[]): { partes: ParteCont
   const fusion = new Map<string, ParteConteo>();
   let cantidad = CERO;
   for (const parte of partes) {
-    const cantidadParte = desdeBD(String(parte.cantidad), "ParteConteo.cantidad");
-    const factorParte = desdeBD(String(parte.factor), "ParteConteo.factor");
+    // ParteConteo viaja como JSON de texto decimal (snapshot del ledger):
+    // se interpreta con aDecimal (fail-closed) — nunca float.
+    const cantidadParte = aDecimal(parte.cantidad);
+    const factorParte = aDecimal(parte.factor);
+    if (!cantidadParte || !factorParte) {
+      throw new Error("VALOR_DECIMAL_CORRUPTO:ParteConteo");
+    }
     const previa = fusion.get(parte.unidad);
     if (previa) {
-      previa.cantidad = desdeBD(String(previa.cantidad), "ParteConteo.cantidad")
-        .plus(cantidadParte)
-        .toString();
+      previa.cantidad = (aDecimal(previa.cantidad) ?? CERO).plus(cantidadParte).toString();
     } else {
       fusion.set(parte.unidad, { ...parte });
     }
@@ -535,10 +540,10 @@ export function fusionarPartesConteo(partes: ParteConteo[]): { partes: ParteCont
   }
   // Paquetes primero, unidades sueltas de la base al final
   const lista = [...fusion.values()].sort((a, b) =>
-    desdeBD(String(b.factor), "ParteConteo.factor").cmp(desdeBD(String(a.factor), "ParteConteo.factor")),
+    (aDecimal(b.factor) ?? CERO).cmp(aDecimal(a.factor) ?? CERO),
   );
   return {
-    partes: lista.filter((p) => esMayorQueCero(desdeBD(String(p.cantidad), "ParteConteo.cantidad"))),
+    partes: lista.filter((p) => esMayorQueCero(aDecimal(p.cantidad))),
     cantidad,
   };
 }

@@ -14,6 +14,7 @@ import { CERO, aDecimal, sumar } from "@/lib/numerico";
 import { requerirPermiso } from "@/modulos/autenticacion/servicios/auth";
 import {
   asegurarUnidadesBase,
+  type EmpaqueProducto,
   validarEmpaqueProducto,
 } from "@/modulos/unidades/servicios/nucleo";
 
@@ -83,7 +84,9 @@ export async function POST(request: Request) {
 
     // Empaque de conteo configurado POR PRODUCTO: cuántas unidades base
     // lleva cada paquete (p. ej. 80101-06129 → 1 PAQ = 10 PZA).
-    let empaque: { unidadPaquete: string | null; contenidoPaquete: string | null };
+    // Empaque validado (EmpaqueProducto: contenidoPaquete es Decimal —
+    // ADR-010: persistencia directa en la columna NUMERIC).
+    let empaque: EmpaqueProducto;
     try {
       empaque = await validarEmpaqueProducto(unidad, cuerpo);
     } catch (e) {
@@ -102,14 +105,15 @@ export async function POST(request: Request) {
         unidad,
         unidadPaquete: empaque.unidadPaquete,
         contenidoPaquete: empaque.contenidoPaquete,
-        // Decimal exacto: entrada inválida → 0 (mismo contrato que antes)
-        stockMinimo: aDecimal(cuerpo.stockMinimo)?.toString() ?? CERO.toString(),
+        // Decimal exacto (ADR-010): entrada inválida → 0 (mismo contrato).
+        // La respuesta se serializa a string (contrato JSON estable).
+        stockMinimo: aDecimal(cuerpo.stockMinimo) ?? CERO,
         costoUnitario:
           cuerpo.costoUnitario === null || cuerpo.costoUnitario === "" || cuerpo.costoUnitario === undefined
             ? null
             : (() => {
                 const costo = aDecimal(cuerpo.costoUnitario);
-                return costo && !costo.isNeg() ? costo.toString() : null;
+                return costo && !costo.isNeg() ? costo : null;
               })(),
       },
     });

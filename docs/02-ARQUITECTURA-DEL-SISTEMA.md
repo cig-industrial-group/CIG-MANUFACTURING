@@ -41,7 +41,7 @@ autenticación es la **guarda `requerirPermiso()`** invocada al inicio de cada m
 ruta (`route.ts`). Es una decisión deliberada, no una omisión: cada endpoint declara
 explícitamente el permiso que exige, la guarda es una sola función auditable, y no existe
 ninguna ruta "olvidada" por una coincidencia de patrón de URL (ver
-[ADR-004](./06-REGISTRO-DECISIONES-ARQUITECTONICAS%20%28ADR%29.md)). Cuando este documento
+[ADR-004](./adr/ADR-004-guarda-autenticacion-por-ruta.md)). Cuando este documento
 dice «middleware de autenticación», se refiere a esta guarda.
 
 ### 1.2 Ciclo de la sesión JWT (cookie httpOnly)
@@ -246,7 +246,7 @@ ReadWritePaths=…/.next/standalone/.next/cache
 Resultado observable: el proceso solo puede escribir en `db/`, `logs/` y la caché del
 standalone; todo lo demás (incluido su propio código) es de solo lectura. La justificación
 de `ProtectHome=read-only` frente a `yes` está en
-[ADR-002](./06-REGISTRO-DECISIONES-ARQUITECTONICAS%20%28ADR%29.md). La unidad `caddy.service`
+[ADR-002](./adr/ADR-002-systemd-hardening.md). La unidad `caddy.service`
 aplica el mismo bloque con `ProtectHome=yes` (Caddy no vive en `/home`) y solo la capacidad
 `CAP_NET_BIND_SERVICE`.
 

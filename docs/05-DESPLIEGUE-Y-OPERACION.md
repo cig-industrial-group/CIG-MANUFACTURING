@@ -356,7 +356,7 @@ Detalles de Docker y del entorno de desarrollo (incluidas las pruebas E2E de
 
 Referencia operativa de la política de la cookie de sesión
 `cig_manufacturing_sesion` (decisión y justificación completas en
-[ADR-007](./06-REGISTRO-DECISIONES-ARQUITECTONICAS%20(ADR).md)). La emite y
+[ADR-007](./adr/ADR-007-cookie-sesion-endurecida.md)). La emite y
 elimina exclusivamente `src/modulos/autenticacion/servicios/auth.ts`
 (`conCookieSesion`/`sinCookieSesion`); las rutas que crean sesión son
 `/api/auth/login`, `/api/auth/registro` y `/api/auth/recuperacion/confirmar`,
@@ -406,7 +406,7 @@ autenticación y afirma la matriz completa de atributos (producción con/sin
 
 Referencia operativa de la auditoría de dependencias integrada en el build
 de la imagen Docker (decisión y justificación completas en
-[ADR-008](./06-REGISTRO-DECISIONES-ARQUITECTONICAS%20(ADR).md)).
+[ADR-008](./adr/ADR-008-auditoria-cadena-suministro.md)).
 
 ### 8.1 La puerta del Dockerfile
 
