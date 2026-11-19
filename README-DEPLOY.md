@@ -1,5 +1,8 @@
 # CIG-MANUFACTURING — Guía de Despliegue Automatizado (`deploy.sh`)
 
+> ⚖️ **AVISO LEGAL:** Copyright © 2026 Emmanuel Caballero De La Rosa. Todos los derechos reservados.  
+> Tijuana, Baja California, México. Este proyecto es propiedad privada y confidencial. Queda prohibida su reproducción, distribución o uso no autorizado sin permiso explícito por escrito.
+
 Instalador de producción para **Ubuntu 22.04 LTS** con aislamiento de seguridad
 extremo: transforma un servidor virgen en un entorno de producción seguro y
 operativo en menos de 5 minutos (más el tiempo de `apt upgrade` y, con dominio,
@@ -288,6 +291,15 @@ git pull origin main
 sudo ./deploy.sh        # recompila y reinicia; conserva datos
 ```
 
+> ⚠️ **ADVERTENCIA (actualización a ≥ v2.2.0):** Al aplicar la migración
+> `20261112214224_add_password_cambiada_en_session_revocation`, el campo
+> `passwordCambiadaEn` se establece en `now()`. Esto **revoca inmediatamente**
+> todas las sesiones JWT existentes, forzando un nuevo inicio de sesión.
+> No esperar 24 h: `obtenerSesion()` compara la emisión del token
+> (`payload.iat`) contra `passwordCambiadaEn` y rechaza cualquier sesión
+> anterior a esa marca (OWASP ASVS 3.3.1 / NIST SP 800-63B §7.1). Avisa a
+> los usuarios antes de la ventana de despliegue.
+
 ## 8. Migración de una instalación desde v1.1.1 (SQLite)
 
 Si actualizas desde la **v1.1.1** — cuyo motor era SQLite embebido (un
@@ -393,6 +405,17 @@ La IP solo alimenta el límite secundario de volumen (`login:ip:{ip}`,
 la cabecera `X-Forwarded-For` se ignora salvo que se declare
 `PROXY_DE_CONFIANZA=1` en `.env`.
 
+> **Estado seguro por defecto:** `PROXY_DE_CONFIANZA` es fail-closed por
+> defecto — `0` o sin definir significa que la app **ignora**
+> `X-Forwarded-For` y toda petición cuenta como `local` para el límite
+> secundario por IP. **Solo `deploy.sh` la establece en `1`**, y únicamente
+> cuando aprovisiona el proxy oficial Caddy (que sobrescribe la cabecera
+> con la IP real del cliente). Quien despliegue manualmente (Docker,
+> systemd propio, otro proxy inverso) debe saber que dejarla en `0` es el
+> estado seguro por defecto y que activarla requiere que el proxy
+> sobrescriba `X-Forwarded-For`; en caso contrario, un atacante podría
+> fabricar IPs.
+
 - El despliegue oficial (Caddy como proxy inverso que **sobrescribe**
   `X-Forwarded-For` con la IP real del cliente) debe fijar
   `PROXY_DE_CONFIANZA=1`; de lo contrario todas las peticiones cuentan
@@ -455,6 +478,18 @@ Conocer ambos y su conmutación es parte de la operación del sistema.
   despliegue oficial siempre lo pone): sin ella, la cabecera
   `X-Forwarded-For` se ignora (fail-closed) y el límite secundario por IP
   agrupa a todos los clientes como «local». `deploy.sh` la fija (RF-D1).
+- **Estado seguro por defecto (fail-closed):** la variable es `0`/indefinida
+  salvo que algo la declare. **Solo `deploy.sh` la establece en `1`**, y lo
+  hace al aprovisionar el proxy oficial Caddy (que SOBRESCRIBE
+  `X-Forwarded-For` con la IP real del cliente): al generar el `.env` por
+  primera vez y, de faltar la clave, al re-desplegar sobre un `.env`
+  existente (nunca pisa un valor fijado a mano por el operador). Quien
+  despliegue manualmente (Docker, systemd propio, otro proxy) debe saber
+  que **dejarla en `0` es el estado seguro por defecto**: la app ignorará
+  `X-Forwarded-For` y toda petición contará como `local` para el límite
+  secundario por IP — el bloqueo principal sigue siendo por CUENTA y no
+  depende de este ajuste. Actívala en `1` únicamente si tu proxy
+  sobrescribe la cabecera (ver arriba las condiciones exactas).
 - **HSTS presente pero inoperante**: el proxy envía
   `Strict-Transport-Security: max-age=31536000; includeSubDomains`, pero el
   navegador SOLO honra esta cabecera recibida por HTTPS — sobre HTTP no tiene
