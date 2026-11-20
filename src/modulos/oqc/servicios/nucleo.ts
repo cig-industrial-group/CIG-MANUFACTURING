@@ -172,7 +172,7 @@ function aPartida(m: FilaMovimiento & { salidaId: string | null; salidaFolio: st
   return { ...base, salidaId: m.salidaId, salidaFolio: m.salidaFolio } as PartidaSalida;
 }
 
-/** Proyección de un registro de scrap (Decimal de BD → string de API) */
+/** Proyección de un registro de scrap */
 export function aRegistroScrap(r: {
   id: string;
   folio: string;
@@ -183,8 +183,7 @@ export function aRegistroScrap(r: {
   almacenId: string | null;
   almacenCodigo: string | null;
   almacenNombre: string | null;
-  /** ADR-010: llega como Prisma.Decimal (columna NUMERIC) */
-  cantidad: Decimal;
+  cantidad: string;
   motivo: string;
   notas: string | null;
   responsable: string | null;
@@ -197,15 +196,13 @@ export function aRegistroScrap(r: {
 }): RegistroScrap {
   return {
     ...r,
-    // Contrato JSON estable: Decimal se serializa a string.
-    cantidad: r.cantidad.toString(),
     conteo: parsearConteo(r.conteoDetalle),
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
   };
 }
 
-/** Proyección de un registro de rechazo (Decimal de BD → string de API) */
+/** Proyección de un registro de rechazo */
 export function aRegistroRechazo(r: {
   id: string;
   folio: string;
@@ -218,8 +215,7 @@ export function aRegistroRechazo(r: {
   clienteNombre: string | null;
   salidaId: string | null;
   salidaFolio: string | null;
-  /** ADR-010: llega como Prisma.Decimal (columna NUMERIC) */
-  cantidad: Decimal;
+  cantidad: string;
   motivo: string;
   disposicion: string;
   notas: string | null;
@@ -235,8 +231,6 @@ export function aRegistroRechazo(r: {
     : "PENDIENTE";
   return {
     ...r,
-    // Contrato JSON estable: Decimal se serializa a string.
-    cantidad: r.cantidad.toString(),
     disposicion,
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),

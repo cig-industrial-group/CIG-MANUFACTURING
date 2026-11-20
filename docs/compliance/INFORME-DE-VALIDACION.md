@@ -137,7 +137,7 @@ Detalle de coberturas clave:
 | `docs/03-GUIA-DESARROLLO-NUEVOS-MODULOS.md` | **Nuevo** |
 | `docs/04-REFERENCIA-BASE-DATOS.md` | **Nuevo** |
 | `docs/05-DESPLIEGUE-Y-OPERACION.md` | **Nuevo** |
-| `docs/adr/` (ADR-001…ADR-010 + `00-INDICE.md`) | **Nuevo** (reestructurado en v2.3.0 desde el archivo unificado) |
+| `docs/06-REGISTRO-DECISIONES-ARQUITECTONICAS (ADR).md` | **Nuevo** |
 | `DESPLIEGUE.md` | **Modificado** — banner de deprecación (líneas 3–6) |
 | `README.md` | **Modificado** — secciones Modelo de datos / Desarrollo / enlace de despliegue y estructura del proyecto |
 | `scripts/validar-docs-suite.py` | **Nuevo (herramienta de auditoría)** — re-ejecutable: `python3 scripts/validar-docs-suite.py <raíz-del-repo>` |

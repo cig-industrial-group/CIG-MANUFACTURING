@@ -107,27 +107,22 @@ model Producto {
   // unidades. Ej.: 80101-06129 → 1 PAQ = 10 PZA; 80101-06130 → 1 PAQ = 24 PZA.
   // El stock SIEMPRE vive en la unidad base; el empaque es solo una
   // forma de capturar y desplegar el conteo (3 PAQ × 10 + 2 PZA = 32 PZA).
-  // ===== INTEGRIDAD NUMÉRICA (ADR-010, v2.3.0) =====
-  // Las cantidades, costos y medidas persisten como NUMERIC nativo de
-  // PostgreSQL (Decimal en Prisma): el dominio numérico lo impone el
-  // MOTOR, no solo la aplicación (NIST SP 800-53 SI-10/SC-28, ISO/IEC
-  // 27001 A.8.15). La era «Decimales como String/TEXT» quedó cerrada:
-  // era la decisión correcta para el motor SQLite (ADR-001), donde el
-  // mapeo Decimal persistía REAL/float64; con PostgreSQL 16 el texto
-  // exacto es anacronismo. Precisión: NUMERIC(15,6) replica la frontera
-  // que src/lib/numerico.ts ya imponía (15 enteros / 6 decimales) y
-  // NUMERIC(15,4) para el costo (práctica contable, subcentavos).
-  // Float/Real siguen PROHIBIDOS para cantidades, costos o medidas.
-  // El contrato JSON no cambia: Prisma.Decimal se serializa a string.
+  // ===== INTEGRIDAD NUMÉRICA (remediación Fase 1) =====
+  // ADR «Decimales como String/TEXT sobre PostgreSQL»: las cantidades,
+  // costos y medidas se almacenan como TEXTO decimal exacto (String en
+  // Prisma). PostgreSQL dispone de NUMERIC, pero migrar las columnas a
+  // Decimal cambiaría el contrato de tipos en runtime (String → Prisma.Decimal)
+  // y forzaría una refactorización de src/lib/numerico.ts y de toda la UI
+  // que hoy consume `string`, lo que viola la regla de no tocar la lógica
+  // de negocio durante la migración de motor. Toda la aritmética sigue
+  // haciéndose con Decimal exacto en la capa de aplicación (numerico.ts:
+  // fail-closed, forma canónica, comparaciones exactas), por lo que la
+  // integridad numérica queda garantizada sin alterar el contrato.
   unidadPaquete    String? // código de la unidad de paquete del catálogo (PAQ, CJA...)
+  contenidoPaquete String? // unidades base que contiene cada paquete ("10"; decimal exacto)
 
-  /// Unidades base que contiene cada paquete (1 PAQ = 10 PZA); decimal exacto.
-  contenidoPaquete Decimal? @db.Decimal(15, 6)
-
-  /// Umbral de alerta de stock bajo, en la unidad base del producto.
-  stockMinimo   Decimal  @default(0) @db.Decimal(15, 6)
-  /// Costo por unidad (monetario; 4 decimales, práctica contable).
-  costoUnitario Decimal? @db.Decimal(15, 4)
+  stockMinimo  String    @default("0") // decimal exacto en unidad base
+  costoUnitario String? // costo por unidad (monetario, decimal exacto)
   activo       Boolean   @default(true)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -139,8 +134,7 @@ model Stock {
   id         String   @id @default(cuid())
   productoId String
   almacenId  String
-  /// Cantidad en la unidad base del producto (ADR-010: NUMERIC nativo).
-  cantidad   Decimal  @default(0) @db.Decimal(15, 6)
+  cantidad   String   @default("0") // decimal exacto en unidad base (ver src/lib/numerico.ts)
   updatedAt  DateTime @updatedAt
 
   producto Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
@@ -163,11 +157,8 @@ model Movimiento {
   productoId       String // referencia suave (sin FK)
   almacenOrigenId  String? // referencia suave (sin FK)
   almacenDestinoId String? // referencia suave (sin FK)
-  /// Cantidad en la unidad base del producto (ADR-010: NUMERIC nativo;
-  /// los AJUSTE conservan el signo, el resto siempre es positivo).
-  cantidad         Decimal  @db.Decimal(15, 6)
-  /// Snapshot del stock resultante tras aplicar el efecto del movimiento.
-  cantidadDespues  Decimal? @db.Decimal(15, 6)
+  cantidad         String // decimal exacto en unidad base (ver src/lib/numerico.ts)
+  cantidadDespues  String? // snapshot de stock resultante (decimal exacto)
   motivo           String?
   referencia       String? // factura, orden de compra, orden de producción...
   responsable      String?
@@ -451,8 +442,7 @@ model RegistroScrap {
   almacenCodigo String?
   almacenNombre String?
 
-  /// Cantidad en la unidad base del producto (ADR-010: NUMERIC nativo).
-  cantidad    Decimal @db.Decimal(15, 6)
+  cantidad    String // decimal exacto en unidad base (ver src/lib/numerico.ts)
   motivo      String // causa del scrap (defecto, daño, no conforme...)
   notas       String?
   responsable String?
@@ -494,8 +484,7 @@ model RegistroRechazo {
   salidaId    String?
   salidaFolio String?
 
-  /// Cantidad rechazada (documental; ADR-010: NUMERIC nativo).
-  cantidad     Decimal @db.Decimal(15, 6)
+  cantidad     String // decimal exacto (documental; ver src/lib/numerico.ts)
   motivo       String // defecto / causa del rechazo
   disposicion  String @default("PENDIENTE") // PENDIENTE | RETRABAJO | SCRAP | LIBERADO
   notas        String?

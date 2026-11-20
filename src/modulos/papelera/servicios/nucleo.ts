@@ -22,7 +22,7 @@
  */
 import { db } from "@/lib/db";
 import { transaccion } from "@/lib/reintentos";
-import { CERO, aDecimal } from "@/lib/numerico";
+import { aDecimal } from "@/lib/numerico";
 import { ErrorNegocio } from "@/modulos/almacen/servicios/nucleo";
 import { sanearEmpaqueProducto } from "@/modulos/unidades/servicios/nucleo";
 
@@ -291,11 +291,10 @@ async function restaurarProductoTx(tx: PrismaTx, datos: DatosPapelera) {
   // ya no existe/está inactiva o dejó de ser compatible con la unidad
   // base, se restaura sin empaque (captura directa en unidad base).
   const unidad = datos.unidad ?? "PZA";
-  // El snapshot de la papelera es JSON (texto o número legado): se
-  // normaliza con aDecimal (fail-closed) y se restaura como Decimal.
   const empaque = await sanearEmpaqueProducto(unidad, {
     unidadPaquete: datos.unidadPaquete ?? null,
-    contenidoPaquete: aDecimal(datos.contenidoPaquete),
+    // Snapshot legado (número) o texto decimal: se normaliza a texto exacto
+    contenidoPaquete: aDecimal(datos.contenidoPaquete)?.toString() ?? null,
   });
 
   await tx.producto.create({
@@ -308,10 +307,8 @@ async function restaurarProductoTx(tx: PrismaTx, datos: DatosPapelera) {
       unidad,
       unidadPaquete: empaque.unidadPaquete,
       contenidoPaquete: empaque.contenidoPaquete,
-      // ADR-010: restauración persiste Decimal directo (columna NUMERIC);
-      // snapshot legado inválido → 0/null (mismo contrato que la era String).
-      stockMinimo: aDecimal(datos.stockMinimo ?? 0) ?? CERO,
-      costoUnitario: aDecimal(datos.costoUnitario),
+      stockMinimo: aDecimal(datos.stockMinimo ?? 0)?.toString() ?? "0",
+      costoUnitario: aDecimal(datos.costoUnitario)?.toString() ?? null,
       // Se restaura visible: quien lo trae de vuelta quiere verlo
       activo: true,
       createdAt: new Date(datos.createdAt),

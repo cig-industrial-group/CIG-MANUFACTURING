@@ -70,8 +70,7 @@ async function aplicarMovimiento(params: {
     return (
       stock ??
       (await db.stock.create({
-        // ADR-010: Decimal directo (columna NUMERIC).
-        data: { productoId: producto.id, almacenId, cantidad: new Prisma.Decimal(0) },
+        data: { productoId: producto.id, almacenId, cantidad: "0" },
       }))
     );
   };
@@ -80,31 +79,31 @@ async function aplicarMovimiento(params: {
     if (!destino) throw new Error(`${tipo} requiere almacén destino`);
     const stock = await leerOcrearStock(destino.id);
     const nueva = new Prisma.Decimal(stock.cantidad).plus(cantidad.abs());
-    await db.stock.update({ where: { id: stock.id }, data: { cantidad: nueva } });
+    await db.stock.update({ where: { id: stock.id }, data: { cantidad: nueva.toString() } });
     cantidadDespues = nueva.toString();
   } else if (tipo === "SALIDA") {
     if (!origen) throw new Error("SALIDA requiere almacén origen");
     const stock = await leerOcrearStock(origen.id);
     const nueva = new Prisma.Decimal(stock.cantidad).minus(cantidad.abs());
     if (nueva.isNeg()) throw new Error(`Stock insuficiente para ${sku} en ${origen.codigo}`);
-    await db.stock.update({ where: { id: stock.id }, data: { cantidad: nueva } });
+    await db.stock.update({ where: { id: stock.id }, data: { cantidad: nueva.toString() } });
     cantidadDespues = nueva.toString();
   } else if (tipo === "TRASLADO") {
     if (!origen || !destino) throw new Error("TRASLADO requiere origen y destino");
     const stockO = await leerOcrearStock(origen.id);
     const nuevoO = new Prisma.Decimal(stockO.cantidad).minus(cantidad.abs());
     if (nuevoO.isNeg()) throw new Error(`Stock insuficiente para ${sku} en ${origen.codigo}`);
-    await db.stock.update({ where: { id: stockO.id }, data: { cantidad: nuevoO } });
+    await db.stock.update({ where: { id: stockO.id }, data: { cantidad: nuevoO.toString() } });
     const stockD = await leerOcrearStock(destino.id);
     const nuevoD = new Prisma.Decimal(stockD.cantidad).plus(cantidad.abs());
-    await db.stock.update({ where: { id: stockD.id }, data: { cantidad: nuevoD } });
+    await db.stock.update({ where: { id: stockD.id }, data: { cantidad: nuevoD.toString() } });
     cantidadDespues = nuevoD.toString();
   } else if (tipo === "AJUSTE") {
     if (!destino) throw new Error("AJUSTE requiere almacén destino");
     const stock = await leerOcrearStock(destino.id);
     const nuevo = new Prisma.Decimal(stock.cantidad).plus(cantidad); // cantidad firmada
     if (nuevo.isNeg()) throw new Error(`Ajuste deja stock negativo para ${sku}`);
-    await db.stock.update({ where: { id: stock.id }, data: { cantidad: nuevo } });
+    await db.stock.update({ where: { id: stock.id }, data: { cantidad: nuevo.toString() } });
     cantidadDespues = nuevo.toString();
   }
 
@@ -115,9 +114,8 @@ async function aplicarMovimiento(params: {
       productoId: producto.id,
       almacenOrigenId: origen?.id ?? null,
       almacenDestinoId: destino?.id ?? null,
-      // Los ajustes conservan el signo; el resto siempre es positivo.
-      // ADR-010: Decimal directo (columna NUMERIC).
-      cantidad: tipo === "AJUSTE" ? cantidad : cantidad.abs(),
+      // Los ajustes conservan el signo; el resto siempre es positivo
+      cantidad: (tipo === "AJUSTE" ? cantidad : cantidad.abs()).toString(),
       cantidadDespues,
       motivo: params.motivo,
       referencia: params.referencia,
@@ -155,22 +153,22 @@ async function main() {
   console.log("Creando productos...");
   await db.producto.createMany({
     data: [
-      { sku: "MP-0001", nombre: "Lámina de Acero CR Cal. 14", descripcion: "Lámina de acero laminado en frío, calibre 14, 1.22 x 2.44 m", categoria: "MATERIA_PRIMA", unidad: "KG", stockMinimo: new Prisma.Decimal("800"), costoUnitario: new Prisma.Decimal("28.5") },
-      { sku: "MP-0002", nombre: "Lámina Galvanizada Cal. 16", descripcion: "Lámina galvanizada 1.22 x 2.44 m", categoria: "MATERIA_PRIMA", unidad: "KG", stockMinimo: new Prisma.Decimal("500"), costoUnitario: new Prisma.Decimal("32") },
-      { sku: "MP-0003", nombre: 'Tubo Estructural 2" x 2"', descripcion: "Tubo cuadrado negro cal. 14, 6 m", categoria: "MATERIA_PRIMA", unidad: "M", stockMinimo: new Prisma.Decimal("300"), costoUnitario: new Prisma.Decimal("95") },
-      { sku: "MP-0004", nombre: 'Perfil Ángulo 1.5" x 1/8"', descripcion: "Perfil angular de acero, 6 m", categoria: "MATERIA_PRIMA", unidad: "M", stockMinimo: new Prisma.Decimal("200"), costoUnitario: new Prisma.Decimal("68") },
-      { sku: "MP-0005", nombre: "Pintura Epóxica Blanca", descripcion: "Cubeta 19 L, acabado industrial", categoria: "MATERIA_PRIMA", unidad: "L", stockMinimo: new Prisma.Decimal("60"), costoUnitario: new Prisma.Decimal("210") },
-      { sku: "MP-0006", nombre: "Pintura Epóxica Gris Grafito", descripcion: "Cubeta 19 L, acabado industrial", categoria: "MATERIA_PRIMA", unidad: "L", stockMinimo: new Prisma.Decimal("60"), costoUnitario: new Prisma.Decimal("215") },
-      { sku: "MP-0007", nombre: 'Tornillo Autoperforante 8 x 1"', descripcion: "Cabeza hexagonal con arandela, caja 500 pzas", categoria: "MATERIA_PRIMA", unidad: "PZA", stockMinimo: new Prisma.Decimal("2000"), costoUnitario: new Prisma.Decimal("1.8") },
-      { sku: "MP-0008", nombre: "Alambre de Soldadura MIG 0.8 mm", descripcion: "Carrete 15 kg ER70S-6", categoria: "MATERIA_PRIMA", unidad: "KG", stockMinimo: new Prisma.Decimal("80"), costoUnitario: new Prisma.Decimal("74") },
-      { sku: "MP-0009", nombre: "Caja de Cartón Corrugado 60x40x40", descripcion: "Doble capa, paquete 20 pzas", categoria: "MATERIA_PRIMA", unidad: "PZA", stockMinimo: new Prisma.Decimal("400"), costoUnitario: new Prisma.Decimal("18.5") },
-      { sku: "PT-0001", nombre: "Rack Metálico Industrial 3 Niveles", descripcion: "Capacidad 350 kg por nivel, 1.8 m alto", categoria: "PRODUCTO_TERMINADO", unidad: "PZA", stockMinimo: new Prisma.Decimal("25"), costoUnitario: new Prisma.Decimal("2450") },
-      { sku: "PT-0002", nombre: "Repisa Metálica 90 x 45 cm", descripcion: "Cal. 16 con refuerzos, acabado epóxico", categoria: "PRODUCTO_TERMINADO", unidad: "PZA", stockMinimo: new Prisma.Decimal("60"), costoUnitario: new Prisma.Decimal("385") },
-      { sku: "PT-0003", nombre: "Tarima Metálica Ligera", descripcion: "1.0 x 1.2 m, patas desmontables", categoria: "PRODUCTO_TERMINADO", unidad: "PZA", stockMinimo: new Prisma.Decimal("30"), costoUnitario: new Prisma.Decimal("1180") },
-      { sku: "PT-0004", nombre: "Banco de Trabajo Industrial", descripcion: "Encimeras de madera, 2.0 x 0.75 m", categoria: "PRODUCTO_TERMINADO", unidad: "PZA", stockMinimo: new Prisma.Decimal("10"), costoUnitario: new Prisma.Decimal("3200") },
-      { sku: "IN-0001", nombre: "Guantes de Nitrilo Talla M", descripcion: "Par, resistencia a cortos nivel 3", categoria: "INSUMO", unidad: "PAR", stockMinimo: new Prisma.Decimal("100"), costoUnitario: new Prisma.Decimal("42") },
-      { sku: "IN-0002", nombre: "Cinta Adhesiva Industrial 48 mm", descripcion: "Rollo 100 m, alta resistencia", categoria: "INSUMO", unidad: "PZA", stockMinimo: new Prisma.Decimal("60"), costoUnitario: new Prisma.Decimal("35") },
-      { sku: "IN-0003", nombre: 'Disco de Corte 4.5"', descripcion: "Metal inoxidable, paquete 25 pzas", categoria: "INSUMO", unidad: "PZA", stockMinimo: new Prisma.Decimal("150"), costoUnitario: new Prisma.Decimal("22") },
+      { sku: "MP-0001", nombre: "Lámina de Acero CR Cal. 14", descripcion: "Lámina de acero laminado en frío, calibre 14, 1.22 x 2.44 m", categoria: "MATERIA_PRIMA", unidad: "KG", stockMinimo: "800", costoUnitario: "28.5" },
+      { sku: "MP-0002", nombre: "Lámina Galvanizada Cal. 16", descripcion: "Lámina galvanizada 1.22 x 2.44 m", categoria: "MATERIA_PRIMA", unidad: "KG", stockMinimo: "500", costoUnitario: "32" },
+      { sku: "MP-0003", nombre: 'Tubo Estructural 2" x 2"', descripcion: "Tubo cuadrado negro cal. 14, 6 m", categoria: "MATERIA_PRIMA", unidad: "M", stockMinimo: "300", costoUnitario: "95" },
+      { sku: "MP-0004", nombre: 'Perfil Ángulo 1.5" x 1/8"', descripcion: "Perfil angular de acero, 6 m", categoria: "MATERIA_PRIMA", unidad: "M", stockMinimo: "200", costoUnitario: "68" },
+      { sku: "MP-0005", nombre: "Pintura Epóxica Blanca", descripcion: "Cubeta 19 L, acabado industrial", categoria: "MATERIA_PRIMA", unidad: "L", stockMinimo: "60", costoUnitario: "210" },
+      { sku: "MP-0006", nombre: "Pintura Epóxica Gris Grafito", descripcion: "Cubeta 19 L, acabado industrial", categoria: "MATERIA_PRIMA", unidad: "L", stockMinimo: "60", costoUnitario: "215" },
+      { sku: "MP-0007", nombre: 'Tornillo Autoperforante 8 x 1"', descripcion: "Cabeza hexagonal con arandela, caja 500 pzas", categoria: "MATERIA_PRIMA", unidad: "PZA", stockMinimo: "2000", costoUnitario: "1.8" },
+      { sku: "MP-0008", nombre: "Alambre de Soldadura MIG 0.8 mm", descripcion: "Carrete 15 kg ER70S-6", categoria: "MATERIA_PRIMA", unidad: "KG", stockMinimo: "80", costoUnitario: "74" },
+      { sku: "MP-0009", nombre: "Caja de Cartón Corrugado 60x40x40", descripcion: "Doble capa, paquete 20 pzas", categoria: "MATERIA_PRIMA", unidad: "PZA", stockMinimo: "400", costoUnitario: "18.5" },
+      { sku: "PT-0001", nombre: "Rack Metálico Industrial 3 Niveles", descripcion: "Capacidad 350 kg por nivel, 1.8 m alto", categoria: "PRODUCTO_TERMINADO", unidad: "PZA", stockMinimo: "25", costoUnitario: "2450" },
+      { sku: "PT-0002", nombre: "Repisa Metálica 90 x 45 cm", descripcion: "Cal. 16 con refuerzos, acabado epóxico", categoria: "PRODUCTO_TERMINADO", unidad: "PZA", stockMinimo: "60", costoUnitario: "385" },
+      { sku: "PT-0003", nombre: "Tarima Metálica Ligera", descripcion: "1.0 x 1.2 m, patas desmontables", categoria: "PRODUCTO_TERMINADO", unidad: "PZA", stockMinimo: "30", costoUnitario: "1180" },
+      { sku: "PT-0004", nombre: "Banco de Trabajo Industrial", descripcion: "Encimeras de madera, 2.0 x 0.75 m", categoria: "PRODUCTO_TERMINADO", unidad: "PZA", stockMinimo: "10", costoUnitario: "3200" },
+      { sku: "IN-0001", nombre: "Guantes de Nitrilo Talla M", descripcion: "Par, resistencia a cortos nivel 3", categoria: "INSUMO", unidad: "PAR", stockMinimo: "100", costoUnitario: "42" },
+      { sku: "IN-0002", nombre: "Cinta Adhesiva Industrial 48 mm", descripcion: "Rollo 100 m, alta resistencia", categoria: "INSUMO", unidad: "PZA", stockMinimo: "60", costoUnitario: "35" },
+      { sku: "IN-0003", nombre: 'Disco de Corte 4.5"', descripcion: "Metal inoxidable, paquete 25 pzas", categoria: "INSUMO", unidad: "PZA", stockMinimo: "150", costoUnitario: "22" },
     ],
   });
 

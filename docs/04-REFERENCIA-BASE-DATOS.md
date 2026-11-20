@@ -123,16 +123,16 @@ con `false`/`false`/`"OPERADOR"`.
 | `categoria` | String | `MATERIA_PRIMA` por omisión · `PRODUCTO_TERMINADO` · `MATERIAL` · `INSUMO` |
 | `unidad` | String | código de la unidad BASE del catálogo (`PZA`, `KG`, `M`, `L`…) |
 | `unidadPaquete` | String? | código de la unidad de paquete (`PAQ`, `CJA`…) para conteo |
-| `contenidoPaquete` | Decimal? | unidades base por paquete, **`NUMERIC(15,6)`** (varía POR PRODUCTO; el stock siempre vive en la unidad base; ADR-010) |
-| `stockMinimo` | Decimal | `0` por omisión (alertas); **`NUMERIC(15,6)`** (ADR-010) |
-| `costoUnitario` | Decimal? | valorización; **`NUMERIC(15,4)`** — práctica contable, nunca float (ADR-010) |
+| `contenidoPaquete` | String? | unidades base por paquete, **texto decimal exacto** ("10", "2.5"; varía POR PRODUCTO; el stock siempre vive en la unidad base) |
+| `stockMinimo` | String | `"0"` por omisión (alertas); **texto decimal exacto** |
+| `costoUnitario` | String? | valorización; **texto decimal exacto** (nunca float) |
 | `activo` | Boolean | `true` por omisión |
 | `createdAt` / `updatedAt` | DateTime | automáticos |
 
 ### 2.3 `Stock`
 
 Existencias por combinación producto × almacén. Campos: `id`, `productoId`, `almacenId`
-(FK duras con cascade), `cantidad Decimal` (**`NUMERIC(15,6)`**, `0` por omisión; ADR-010: el dominio numérico lo impone el motor),
+(FK duras con cascade), `cantidad String` (texto decimal exacto; `"0"` por omisión),
 `updatedAt`. Restricción
 `@@unique([productoId, almacenId])` (una fila por combinación) e índice en `almacenId`.
 
@@ -148,8 +148,8 @@ El corazón del sistema. **No se actualiza ni se borra**: las correcciones crean
 | `tipo` | String | `ENTRADA` · `RECEPCION` · `SALIDA` · `TRASLADO` · `AJUSTE` · `SCRAP` |
 | `productoId` | String | referencia suave (sin FK) |
 | `almacenOrigenId` / `almacenDestinoId` | String? | referencias suaves |
-| `cantidad` | Decimal | **siempre en la unidad base del producto**; `NUMERIC(15,6)` (máx. 6 decimales; ADR-010) |
-| `cantidadDespues` | Decimal? | snapshot del stock resultante; `NUMERIC(15,6)` (ADR-010) |
+| `cantidad` | String | **siempre en la unidad base del producto**; texto decimal exacto (máx. 6 decimales) |
+| `cantidadDespues` | String? | snapshot del stock resultante (texto decimal exacto) |
 | `motivo` / `referencia` / `responsable` | String? | causa; factura/OC/remisión; quien firma |
 | `usuarioId` | String? | referencia suave |
 | `usuarioNombre` | String? | snapshot del usuario que registró |
@@ -178,7 +178,7 @@ eliminaciones); `motivo` (capturado por el usuario); `usuarioId` / `usuarioNombr
 Una fila por serie (`clave` **única** = `prefijo-fecha`, p. ej. `SAL-20261103`);
 `ultimo Int` = último número emitido; `updatedAt`. Es la **única autoridad** de folios:
 el contador jamás retrocede (ver §8.1 y
-[ADR-003](./adr/ADR-003-folios-monotonicos-bitacoras-inmutables.md)).
+[ADR-003](./06-REGISTRO-DECISIONES-ARQUITECTONICAS%20%28ADR%29.md)).
 
 ---
 
@@ -270,7 +270,7 @@ Scrap: material desechado tras inspección; **descuenta stock** mediante un `Mov
 tipo `SCRAP` (mismo folio, referencia suave en `movimientoId`). Campos: `id`; `folio`
 **único** `SCR-20261103-0001`; `productoId` + snapshots `productoSku`/`productoNombre`/
 `productoUnidad`; `almacenId` + snapshots `almacenCodigo`/`almacenNombre`; `cantidad
-Decimal` (**`NUMERIC(15,6)`**; ADR-010); `motivo` (defecto, daño, no conforme…); `notas?`; `responsable?`; `usuarioId?`/
+String` (texto decimal exacto); `motivo` (defecto, daño, no conforme…); `notas?`; `responsable?`; `usuarioId?`/
 `usuarioNombre?`; `movimientoId?`; `conteoDetalle?` (snapshot del conteo en paquetes);
 `createdAt`/`updatedAt`. Índices: `createdAt`, `productoId`. Corregible/eliminable con
 bitácora como cualquier movimiento.
@@ -280,7 +280,7 @@ bitácora como cualquier movimiento.
 Rechazo de inspección: **documental, no toca stock**. Campos: `id`; `folio` **único**
 `RECH-20261103-0001`; `productoId` + snapshots; `clienteId`/`clienteCodigo`/
 `clienteNombre?` (destino previsto); `salidaId?`/`salidaFolio?` (salida de origen);
-`cantidad Decimal` (**`NUMERIC(15,6)`**; ADR-010); `motivo`; `disposicion` (`PENDIENTE` por omisión · `RETRABAJO` ·
+`cantidad String` (texto decimal exacto); `motivo`; `disposicion` (`PENDIENTE` por omisión · `RETRABAJO` ·
 `SCRAP` · `LIBERADO`); `notas?`; `responsable?`; `usuarioId?`/`usuarioNombre?`;
 `createdAt`/`updatedAt`. Índices: `createdAt`, `productoId`, `clienteId`, `salidaId`.
 Editable/eliminable directo (no es ledger).
@@ -328,7 +328,7 @@ Log inmutable de eliminaciones. Sin FK: debe sobrevivir a todo.
 - **El contador jamás retrocede.** Eliminar el registro que portaba un folio NO libera
   su número: en planta, un folio impreso en etiqueta o referenciado en auditoría debe
   identificar un único registro para siempre.
-- Motivo completo en [ADR-003](./adr/ADR-003-folios-monotonicos-bitacoras-inmutables.md).
+- Motivo completo en [ADR-003](./06-REGISTRO-DECISIONES-ARQUITECTONICAS%20%28ADR%29.md).
 
 ### 8.2 Papelera de 3 niveles
 

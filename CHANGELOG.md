@@ -8,48 +8,7 @@ Todos los cambios notables de CIG-MANUFACTURING se documentan en este archivo.
 El formato se basa en [Keep a Changelog 1.1.0](https://keepachangelog.com/es-ES/1.1.0/)
 y el proyecto se adhiere al [Versionado Semántico 2.0.0](https://semver.org/lang/es/).
 
-## [2.3.0](https://github.com/cig-industrial-group/CIG-MANUFACTURING/compare/v2.2.0...v2.3.0) - 2026-11-20
-
-Migración total y directa de los campos numéricos a `NUMERIC` nativo de PostgreSQL 
-(TASK-STR-013, ADR-010) y reestructuración completa de la documentación arquitectónica. 
-La deuda técnica de la era «decimales como String/TEXT» queda eliminada: el dominio 
-numérico (15 dígitos enteros, 6 decimales; costos a 4) pasa a imponerlo el **motor de 
-base de datos**, no solo la aplicación (NIST SP 800-53 SI-10/SC-28; ISO/IEC 27001 A.8.15).
-
-**Naturaleza del cambio:** migración **directa de esquema** (sin Expand-and-Contract, 
-sin columnas espejo, sin dual-write — innecesarios en un entorno *greenfield*). A nivel 
-del contrato JSON de la API el cambio es **aditivo** (la respuesta serializa los 
-`Prisma.Decimal` a `string`, exactamente la forma que la UI ya consumía); a nivel de 
-base de datos es una **refactorización estructural** (migración `ALTER COLUMN … TYPE … USING`, transaccional). El frontend no requiere modificación alguna.
-
-### Added
-- **ADR-010:** Migración directa a `NUMERIC` — contexto (deuda String, entorno greenfield), 
-  decisión, alternativas descartadas (incluido el porqué se rechazó el Expand-and-Contract) 
-  y consecuencias.
-- **Carpeta `docs/adr/`:** La suite de decisiones arquitectónicas pasa de un único archivo 
-  unificado a **un archivo por decisión** (ADR-001…ADR-010) con índice maestro 
-  `docs/adr/00-INDICE.md`. El archivo unificado antiguo fue retirado.
-- **README Industrial:** Reescritura completa con enfoque en resiliencia, seguridad, 
-  cumplimiento normativo (ISO 27001, NIST, OWASP) y guía de despliegue.
-
-### Changed
-- **Esquema de datos (ADR-010):** Las columnas numéricas migran directamente de `String`/`TEXT` 
-  a `Decimal`/`NUMERIC`: `Stock.cantidad`, `Movimiento.cantidad` y `cantidadDespues`, 
-  `Producto.stockMinimo`, `costoUnitario` y `contenidoPaquete`, `RegistroScrap.cantidad`, 
-  `RegistroRechazo.cantidad`. Precisión: `NUMERIC(15,6)` para cantidades/medidas y 
-  `NUMERIC(15,4)` para costos. Migración `20261120000000_migracion_directa_numeric` con 
-  `ALTER COLUMN … USING` (conversión en sitio que preserva el valor de la semilla).
-- **Simplificación de la lógica:** `src/lib/numerico.ts` elimina `aValorDual()` y tipa 
-  `desdeBD()` exclusivamente con `Prisma.Decimal`. Los núcleos de negocio (almacén, OQC, 
-  papelera) persisten directamente el tipo `Decimal` validado.
-- **Versión del sistema:** `2.2.0` → `2.3.0` en `package.json` (fuente única de verdad).
-
-### Removed
-- Eliminación de scripts de contingencia y validación de texto heredados 
-  (`scripts/backfill-decimals.ts`, `scripts/prueba-integracion-decimales.ts`), ya que la 
-  migración directa en entorno greenfield los hace innecesarios.
-- Archivo unificado antiguo de decisiones arquitectónicas 
-  (`docs/06-REGISTRO-DECISIONES-ARQUITECTONICAS (ADR).md`).
+## [Unreleased]
 
 ## [2.2.0] - 2026-11-17
 

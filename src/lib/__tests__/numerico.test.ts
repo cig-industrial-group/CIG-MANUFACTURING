@@ -41,7 +41,6 @@
  * vitest.config.ts) sin simular fallos internos del constructor.
  */
 import { describe, expect, it } from 'vitest';
-import { Prisma } from '@prisma/client';
 
 import {
   aDecimal,
@@ -141,10 +140,9 @@ describe('Integridad Numérica (Fallo Seguro)', () => {
         // 0.1 + 0.2 en IEEE-754 produce 0.30000000000000004: el número YA
         // llega corrupto (17 decimales), excede la escala y se rechaza.
         expect(aDecimal(0.30000000000000004)).toBeNull();
-        // Una instancia Decimal fuera de escala tampoco se acepta
-        // (el texto corrupto ya no puede llegar desde la BD — NUMERIC —
-        // pero la frontera de aDecimal sigue siendo fail-closed).
-        expect(aDecimal(new Prisma.Decimal('1234567890123456789'))).toBeNull();
+        // Una instancia Decimal fuera de escala tampoco se acepta.
+        const instanciaCorrupta = desdeBD('0.30000000000000004', 'sondeoDeEscala');
+        expect(aDecimal(instanciaCorrupta)).toBeNull();
       });
 
       it('devuelve null ante tipos no soportados (nunca lanza, nunca corrompe)', () => {
@@ -235,22 +233,20 @@ describe('Integridad Numérica (Fallo Seguro)', () => {
     });
   });
 
-  describe('desdeBD — lectura desde la base de datos (ADR-010: NUMERIC)', () => {
-    it('tipa el valor de las columnas NUMERIC tal como llegan de Prisma', () => {
-      // La BD entrega Prisma.Decimal; desdeBD lo franquea sin conversión.
-      const leido = desdeBD(aDecimalValido('2.50'), 'stockMinimo');
-      expect(texto(leido)).toBe('2.5');
-      expect(texto(desdeBD(aDecimalValido('-3.5'), 'costoUnitario'))).toBe('-3.5');
+  describe('desdeBD — lectura desde la base de datos', () => {
+    it('interpreta el texto persistido como Decimal exacto', () => {
+      expect(texto(desdeBD('2.50', 'stockMinimo'))).toBe('2.5');
+      expect(texto(desdeBD('0.1', 'cantidad'))).toBe('0.1');
+      expect(texto(desdeBD('-3.5', 'costoUnitario'))).toBe('-3.5');
     });
 
-    it('lanza el error de integridad ante columna obligatoria vacía (null)', () => {
-      // Con NUMERIC el texto corrupto ya no puede llegar de la BD (el motor
-      // lo rechaza); el incidente restante es un null inesperado — p. ej.
-      // corrupción externa con SET NULL — y se reporta igual: fail-closed.
-      expect(() => desdeBD(null, 'cantidad')).toThrowError(
-        /^VALOR_DECIMAL_CORRUPTO:cantidad$/,
+    it('lanza el error de integridad específico ante valor corrupto', () => {
+      // Un valor corrupto es un INCIDENTE: no se enmascara con null.
+      expect(() => desdeBD('abc', 'cantidad')).toThrowError(/^VALOR_DECIMAL_CORRUPTO:cantidad$/);
+      expect(() => desdeBD('', 'costoUnitario')).toThrowError(
+        /^VALOR_DECIMAL_CORRUPTO:costoUnitario$/,
       );
-      expect(() => desdeBD(undefined, 'stockMinimo')).toThrowError(
+      expect(() => desdeBD('0.1.2', 'stockMinimo')).toThrowError(
         /^VALOR_DECIMAL_CORRUPTO:stockMinimo$/,
       );
     });
@@ -258,12 +254,12 @@ describe('Integridad Numérica (Fallo Seguro)', () => {
     it('incluye el nombre del campo afectado en el mensaje de error', () => {
       let errorCapturado: Error | null = null;
       try {
-        desdeBD(null, 'cantidadDespues');
+        desdeBD('abc', 'cantidadDespues');
       } catch (error) {
         errorCapturado = error as Error;
       }
       if (errorCapturado === null) {
-        throw new Error('desdeBD debió lanzar ante un valor vacío');
+        throw new Error('desdeBD debió lanzar ante un valor corrupto');
       }
       expect(errorCapturado.message).toBe('VALOR_DECIMAL_CORRUPTO:cantidadDespues');
     });
@@ -283,7 +279,7 @@ describe('Integridad Numérica (Fallo Seguro)', () => {
     });
 
     it('acepta cadenas e instancias Decimal con idéntico resultado', () => {
-      const instancia = desdeBD(aDecimalValido('2.50'), 'stockMinimo');
+      const instancia = desdeBD('2.50', 'stockMinimo');
       expect(texto(instancia)).toBe('2.5');
       expect(texto('2.50')).toBe('2.5');
     });
@@ -345,7 +341,7 @@ describe('Integridad Numérica (Fallo Seguro)', () => {
     });
 
     it('admite mezcla de cadenas e instancias Decimal', () => {
-      const instancia = desdeBD(aDecimalValido('0.1'), 'cantidad');
+      const instancia = desdeBD('0.1', 'cantidad');
       expect(texto(sumar([instancia, '0.2']))).toBe('0.3');
     });
 

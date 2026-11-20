@@ -505,17 +505,14 @@ async function main(): Promise<void> {
   const stockP1 = await db.stock.findUnique({
     where: { productoId_almacenId: { productoId: "prd-fixture-01", almacenId: "alm-fixture-01" } },
   });
-  afirmar(stockP1?.cantidad?.toString() === "70", `NUMERIC exacto: Stock.cantidad === 70 (obtenido: ${stockP1?.cantidad?.toString()})`);
+  afirmar(stockP1?.cantidad === "70", `decimal String exacto: Stock.cantidad === "70" (obtenido: ${stockP1?.cantidad})`);
 
   const prod3 = await db.producto.findUnique({ where: { id: "prd-fixture-03" } });
-  afirmar(prod3?.stockMinimo?.toString() === "2.5", `NUMERIC exacto: Producto.stockMinimo === 2.5 (obtenido: ${prod3?.stockMinimo?.toString()})`);
+  afirmar(prod3?.stockMinimo === "2.5", `decimal String exacto: Producto.stockMinimo === "2.5" (obtenido: ${prod3?.stockMinimo})`);
 
   const movHoy = await db.movimiento.findUnique({ where: { id: "mov-f05" } });
   afirmar(movHoy?.folio === `ENT-${HOY}-0002`, `folio textual exacto: ${movHoy?.folio}`);
-  afirmar(
-    movHoy?.cantidad?.toString() === "0.5" && movHoy?.cantidadDespues?.toString() === "70.5",
-    "decimales del ledger exactos (0.5 / 70.5)",
-  );
+  afirmar(movHoy?.cantidad === "0.5" && movHoy?.cantidadDespues === "70.5", "decimales del ledger exactos (0.5 / 70.5)");
 
   const serieHoy = await db.secuenciaFolio.findUnique({ where: { clave: `ENT-${HOY}` } });
   afirmar(serieHoy?.ultimo === 3, `SecuenciaFolio migrada: ENT-${HOY}.ultimo === 3 (obtenido: ${serieHoy?.ultimo})`);
@@ -555,8 +552,8 @@ async function main(): Promise<void> {
     `la serie de HOY CONTINÚA tras la migración: ${movContinuo.folio} (esperado ENT-${HOY}-0004)`,
   );
   afirmar(
-    movContinuo.cantidadDespues?.toString() === "80",
-    `snapshot del ledger exacto: 70 + 10 = "${movContinuo.cantidadDespues?.toString()}"`,
+    movContinuo.cantidadDespues === "80",
+    `snapshot del ledger exacto: 70 + 10 = "${movContinuo.cantidadDespues}"`,
   );
 
   // Identificador nominal del movimiento recién registrado (id generado
@@ -646,7 +643,7 @@ async function main(): Promise<void> {
   });
   afirmar(productoRestaurado !== null, "el producto REGRESA con el MISMO id (re-vinculación)");
   afirmar(
-    productoRestaurado?.stocks.find((s) => s.almacenId === "alm-fixture-01")?.cantidad?.toString() === "25",
+    productoRestaurado?.stocks.find((s) => s.almacenId === "alm-fixture-01")?.cantidad === "25",
     "el stock se recrea exacto («25»)",
   );
   const entradaTrasRestaurar = await db.papelera.findUnique({ where: { id: entradaPapelera!.id } });
