@@ -167,13 +167,15 @@ type AlmacenTx = NonNullable<Awaited<ReturnType<PrismaTx["almacen"]["findUnique"
 /** Relaciones eliminadas: el movimiento es un registro autodescriptivo
  *  (ledger); los datos de producto/almacén/usuario viven en snapshots. */
 
-/** Filas de movimiento tal como salen de la base (autodescriptivas) */
+/** Filas de movimiento tal como salen de la base (autodescriptivas).
+ *  ADR-010: cantidad/cantidadDespues llegan como Prisma.Decimal (NUMERIC);
+ *  la proyección los serializa a string para conservar el contrato JSON. */
 export type FilaMovimiento = {
   id: string;
   folio: string;
   tipo: string;
-  cantidad: string;
-  cantidadDespues: string | null;
+  cantidad: Decimal;
+  cantidadDespues: Decimal | null;
   motivo: string | null;
   referencia: string | null;
   responsable: string | null;
@@ -211,8 +213,10 @@ export function mapearMovimiento(m: FilaMovimiento, productoExiste = true, clien
     id: m.id,
     folio: m.folio,
     tipo: m.tipo,
-    cantidad: m.cantidad,
-    cantidadDespues: m.cantidadDespues,
+    // Serialización del contrato: Prisma.Decimal → string (el frontend
+    // sigue recibiendo exactamente la misma forma que en la era String).
+    cantidad: m.cantidad.toString(),
+    cantidadDespues: m.cantidadDespues?.toString() ?? null,
     motivo: m.motivo,
     referencia: m.referencia,
     responsable: m.responsable,
@@ -281,7 +285,9 @@ async function aplicarEfectoStockTx(
 
   let almacenOrigen: AlmacenTx | null = null;
   let almacenDestino: AlmacenTx | null = null;
-  let cantidadDespues: string | null = null;
+  // ADR-010: el snapshot del stock resultante viaja como Decimal (la columna
+  // es NUMERIC); se serializa a string solo en la respuesta de la API.
+  let cantidadDespues: Decimal | null = null;
 
   if (tipo === "ENTRADA" || tipo === "RECEPCION") {
     if (!cuerpo.almacenDestinoId) throw new ErrorNegocio("ALMACEN_DESTINO_REQUERIDO");
@@ -296,12 +302,12 @@ async function aplicarEfectoStockTx(
     });
     if (!stock) {
       stock = await tx.stock.create({
-        data: { productoId, almacenId: almacenDestino.id, cantidad: CERO.toString() },
+        data: { productoId, almacenId: almacenDestino.id, cantidad: CERO },
       });
     }
     const nueva = desdeBD(stock.cantidad, "Stock.cantidad").plus(retiro);
-    await tx.stock.update({ where: { id: stock.id }, data: { cantidad: nueva.toString() } });
-    cantidadDespues = nueva.toString();
+    await tx.stock.update({ where: { id: stock.id }, data: { cantidad: nueva } });
+    cantidadDespues = nueva;
   } else if (tipo === "SALIDA" || tipo === "SCRAP") {
     // La salida y el scrap retiran material del almacén de origen
     if (!cuerpo.almacenOrigenId) throw new ErrorNegocio("ALMACEN_ORIGEN_REQUERIDO");
@@ -314,8 +320,8 @@ async function aplicarEfectoStockTx(
     const retiro = cantidad.abs();
     if (disponible.minus(retiro).isNeg()) throw new ErrorNegocio("STOCK_INSUFICIENTE");
     const nueva = disponible.minus(retiro);
-    await tx.stock.update({ where: { id: stock!.id }, data: { cantidad: nueva.toString() } });
-    cantidadDespues = nueva.toString();
+    await tx.stock.update({ where: { id: stock!.id }, data: { cantidad: nueva } });
+    cantidadDespues = nueva;
   } else if (tipo === "TRASLADO") {
     if (!cuerpo.almacenOrigenId || !cuerpo.almacenDestinoId) {
       throw new ErrorNegocio("TRASLADO_REQUIERE_AMBOS");
@@ -336,7 +342,7 @@ async function aplicarEfectoStockTx(
     if (stockOrigen) {
       await tx.stock.update({
         where: { id: stockOrigen.id },
-        data: { cantidad: disponible.minus(cantidadMov).toString() },
+        data: { cantidad: disponible.minus(cantidadMov) },
       });
     }
     let stockDestino = await tx.stock.findUnique({
@@ -344,15 +350,15 @@ async function aplicarEfectoStockTx(
     });
     if (!stockDestino) {
       stockDestino = await tx.stock.create({
-        data: { productoId, almacenId: almacenDestino.id, cantidad: CERO.toString() },
+        data: { productoId, almacenId: almacenDestino.id, cantidad: CERO },
       });
     }
     const nuevaDestino = desdeBD(stockDestino.cantidad, "Stock.cantidad").plus(cantidadMov);
     await tx.stock.update({
       where: { id: stockDestino.id },
-      data: { cantidad: nuevaDestino.toString() },
+      data: { cantidad: nuevaDestino },
     });
-    cantidadDespues = nuevaDestino.toString();
+    cantidadDespues = nuevaDestino;
   } else if (tipo === "AJUSTE") {
     if (!cuerpo.almacenDestinoId) throw new ErrorNegocio("ALMACEN_DESTINO_REQUERIDO");
     almacenDestino = await tx.almacen.findUnique({ where: { id: cuerpo.almacenDestinoId } });
@@ -362,13 +368,13 @@ async function aplicarEfectoStockTx(
     });
     if (!stock) {
       stock = await tx.stock.create({
-        data: { productoId, almacenId: almacenDestino.id, cantidad: CERO.toString() },
+        data: { productoId, almacenId: almacenDestino.id, cantidad: CERO },
       });
     }
     const nuevo = desdeBD(stock.cantidad, "Stock.cantidad").plus(cantidad); // cantidad firmada
     if (nuevo.isNeg()) throw new ErrorNegocio("AJUSTE_NEGATIVO");
-    await tx.stock.update({ where: { id: stock.id }, data: { cantidad: nuevo.toString() } });
-    cantidadDespues = nuevo.toString();
+    await tx.stock.update({ where: { id: stock.id }, data: { cantidad: nuevo } });
+    cantidadDespues = nuevo;
   } else {
     throw new ErrorNegocio("TIPO_INVALIDO");
   }
@@ -388,7 +394,8 @@ async function revertirEfectoStockTx(
     productoId: string;
     almacenOrigenId: string | null;
     almacenDestinoId: string | null;
-    cantidad: string;
+    /** ADR-010: la fila persistida llega como Prisma.Decimal (NUMERIC) */
+    cantidad: Decimal;
   },
 ) {
   /** Suma `delta` al stock (producto, almacén); `exigir` prohíbe negativos */
@@ -407,12 +414,13 @@ async function revertirEfectoStockTx(
     if (exigirNoNegativo && nuevo.isNeg()) {
       throw new ErrorNegocio("REVERSION_NEGATIVA");
     }
-    // El cero exacto sustituye al «snap ±EPSILON» de la era float
-    const finalTexto = (nuevo.isNeg() ? CERO : nuevo).toString();
+    // El cero exacto sustituye al «snap ±EPSILON» de la era float.
+    // ADR-010: la escritura persiste el Decimal directamente (NUMERIC).
+    const final = nuevo.isNeg() ? CERO : nuevo;
     if (stock) {
-      await tx.stock.update({ where: { id: stock.id }, data: { cantidad: finalTexto } });
+      await tx.stock.update({ where: { id: stock.id }, data: { cantidad: final } });
     } else {
-      await tx.stock.create({ data: { productoId, almacenId, cantidad: finalTexto } });
+      await tx.stock.create({ data: { productoId, almacenId, cantidad: final } });
     }
   };
 
@@ -442,8 +450,8 @@ async function revertirEfectoStockTx(
 function snapshotMovimiento(m: {
   folio: string;
   tipo: string;
-  cantidad: string;
-  cantidadDespues: string | null;
+  cantidad: Decimal;
+  cantidadDespues: Decimal | null;
   motivo: string | null;
   referencia: string | null;
   responsable: string | null;
@@ -455,11 +463,13 @@ function snapshotMovimiento(m: {
   salidaFolio?: string | null;
   conteoDetalle?: string | null;
 }) {
+  // La bitácora persiste JSON legible: Decimal se serializa a string
+  // (decimal.js define toJSON → exactamente la forma canónica).
   return {
     folio: m.folio,
     tipo: m.tipo,
-    cantidad: m.cantidad,
-    cantidadDespues: m.cantidadDespues,
+    cantidad: m.cantidad.toString(),
+    cantidadDespues: m.cantidadDespues?.toString() ?? null,
     motivo: m.motivo,
     referencia: m.referencia,
     responsable: m.responsable,
@@ -561,8 +571,9 @@ export async function registrarMovimientoTx(
       productoId: cuerpo.productoId,
       almacenOrigenId: almacenOrigen?.id ?? null,
       almacenDestinoId: almacenDestino?.id ?? null,
-      // Los ajustes conservan el signo; el resto siempre es positivo
-      cantidad: texto(cuerpo.tipo === "AJUSTE" ? cantidad : cantidad.abs()),
+      // Los ajustes conservan el signo; el resto siempre es positivo.
+      // ADR-010: persistencia Decimal directa (columna NUMERIC).
+      cantidad: cuerpo.tipo === "AJUSTE" ? cantidad : cantidad.abs(),
       cantidadDespues,
       motivo: cuerpo.motivo?.trim() || null,
       referencia: cuerpo.referencia?.trim() || null,
@@ -653,7 +664,8 @@ export async function editarMovimientoTx(
       productoId: cuerpo.productoId,
       almacenOrigenId: almacenOrigen?.id ?? null,
       almacenDestinoId: almacenDestino?.id ?? null,
-      cantidad: texto(actual.tipo === "AJUSTE" ? cuerpo.cantidad : cuerpo.cantidad.abs()),
+      // ADR-010: corrección persiste Decimal directo (columna NUMERIC).
+      cantidad: actual.tipo === "AJUSTE" ? cuerpo.cantidad : cuerpo.cantidad.abs(),
       cantidadDespues,
       motivo: cuerpo.motivo !== undefined ? cuerpo.motivo?.trim() || null : actual.motivo,
       referencia:
