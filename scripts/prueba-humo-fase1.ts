@@ -116,8 +116,8 @@ async function main() {
     where: { productoId: "smoke-f1-p1", almacenId: "smoke-f1-a1" },
   });
   afirmar(
-    stockTrasEntradas?.cantidad === "0.3",
-    `Stock.cantidad = "${stockTrasEntradas?.cantidad}" (float64 daría 0.30000000000000004)`,
+    stockTrasEntradas?.cantidad?.toString() === "0.3",
+    `Stock.cantidad = "${stockTrasEntradas?.cantidad?.toString()}" (float64 daría 0.30000000000000004)`,
   );
 
   console.log("\n== 2) Fail-closed: entrada con artefacto float heredado se RECHAZA ==");
@@ -149,8 +149,8 @@ async function main() {
       usuarioNombre: "Prueba de humo",
     }),
   );
-  afirmar(movSalida.cantidad === "0.1", `Movimiento.cantidad = "${movSalida.cantidad}"`);
-  afirmar(movSalida.cantidadDespues === "0.2", `Snapshot cantidadDespues = "${movSalida.cantidadDespues}" (0.3 − 0.1 exacto)`);
+  afirmar(movSalida.cantidad.toString() === "0.1", `Movimiento.cantidad = "${movSalida.cantidad}"`);
+  afirmar(movSalida.cantidadDespues?.toString() === "0.2", `Snapshot cantidadDespues = "${movSalida.cantidadDespues}" (0.3 − 0.1 exacto)`);
 
   console.log("\n== 4) Conteo en paquetes: 3 PAQ × 2.5 + 0.5 sueltas = 8 PZA exactas ==");
   const movConteo = await db.$transaction((tx) =>
@@ -164,8 +164,8 @@ async function main() {
       usuarioNombre: "Prueba de humo",
     }),
   );
-  afirmar(movConteo.cantidad === "8", `Cantidad en unidad base = "${movConteo.cantidad}" (3×2.5 + 0.5)`);
-  afirmar(movConteo.cantidadDespues === "8.2", `Snapshot = "${movConteo.cantidadDespues}" (0.2 + 8 exacto)`);
+  afirmar(movConteo.cantidad.toString() === "8", `Cantidad en unidad base = "${movConteo.cantidad}" (3×2.5 + 0.5)`);
+  afirmar(movConteo.cantidadDespues?.toString() === "8.2", `Snapshot = "${movConteo.cantidadDespues}" (0.2 + 8 exacto)`);
   const partes = movConteo.conteoDetalle ? JSON.parse(movConteo.conteoDetalle) : null;
   afirmar(
     Array.isArray(partes) &&
@@ -186,8 +186,8 @@ async function main() {
       usuarioNombre: "Prueba de humo",
     }),
   );
-  afirmar(movAjuste.cantidad === "-0.15", `Ajuste conserva signo: "${movAjuste.cantidad}"`);
-  afirmar(movAjuste.cantidadDespues === "8.05", `Stock final = "${movAjuste.cantidadDespues}" (8.2 − 0.15 exacto)`);
+  afirmar(movAjuste.cantidad.toString() === "-0.15", `Ajuste conserva signo: "${movAjuste.cantidad}"`);
+  afirmar(movAjuste.cantidadDespues?.toString() === "8.05", `Stock final = "${movAjuste.cantidadDespues}" (8.2 − 0.15 exacto)`);
 
   console.log("\n== 6) Rechazo exacto de salida sin stock ==");
   let sinStock = false;
@@ -208,19 +208,21 @@ async function main() {
   afirmar(sinStock, "SALIDA de 8.06 con stock 8.05 → STOCK_INSUFICIENTE (comparación exacta)");
 
   console.log("\n== 7) Clase de almacenamiento en la base ==");
-  // PostgreSQL: las columnas decimales persisten como text (ADR «Decimales
-  // como String/TEXT»), jamás como float/numeric de doble precisión.
+  // ADR-010 (v2.3.0): las columnas decimales persisten como NUMERIC nativo
+  // (Decimal de Prisma) — jamás como float ni como texto. El dominio lo
+  // impone el motor: esta aserción asegura que ninguna regresión devuelva
+  // las columnas a text ni las degenere a double precision.
   const tipos = (await db.$queryRaw<Array<{ data_type: string }>>(
     Prisma.sql`
       SELECT data_type FROM information_schema.columns
       WHERE table_schema = 'public'
-        AND table_name IN ('Stock', 'Movimiento')
-        AND column_name IN ('cantidad', 'cantidadDespues', 'stockMinimo')
+        AND table_name IN ('Stock', 'Movimiento', 'Producto')
+        AND column_name IN ('cantidad', 'cantidadDespues', 'stockMinimo', 'costoUnitario', 'contenidoPaquete')
       GROUP BY data_type`,
   )) as Array<{ data_type: string }>;
   afirmar(
-    tipos.length === 1 && tipos[0].data_type === "text",
-    `todas las columnas decimales son text (${tipos.map((t) => t.data_type).join(", ") || "sin filas"})`,
+    tipos.length === 1 && tipos[0].data_type === "numeric",
+    `todas las columnas numéricas son numeric (${tipos.map((t) => t.data_type).join(", ") || "sin filas"})`,
   );
 
   console.log("\n== 8) Limpieza ==");

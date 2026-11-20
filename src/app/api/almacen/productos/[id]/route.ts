@@ -16,6 +16,7 @@ import { ErrorNegocio } from "@/modulos/almacen/servicios/nucleo";
 import { DIAS_RESTAURACION, enviarProductoAPapelera } from "@/modulos/papelera/servicios/nucleo";
 import {
   asegurarUnidadesBase,
+  type EmpaqueProducto,
   sanearEmpaqueProducto,
   validarEmpaqueProducto,
 } from "@/modulos/unidades/servicios/nucleo";
@@ -64,7 +65,9 @@ export async function PATCH(request: Request, { params }: Ctx) {
     // se valida contra la unidad final; si la unidad base cambia y el
     // empaque vigente deja de ser compatible, se retira automáticamente
     // (p. ej. pasar de PZA a KG invalida un empaque PAQ→PZA).
-    let empaque: { unidadPaquete: string | null; contenidoPaquete: string | null } | undefined;
+    // EmpaqueProducto (ADR-010): contenidoPaquete Decimal — persistencia
+    // directa en NUMERIC; existente.contenidoPaquete ya llega como Decimal.
+    let empaque: EmpaqueProducto | undefined;
     if (cuerpo.unidadPaquete !== undefined || cuerpo.contenidoPaquete !== undefined) {
       try {
         empaque = await validarEmpaqueProducto(unidadFinal, {
@@ -112,12 +115,10 @@ export async function PATCH(request: Request, { params }: Ctx) {
           contenidoPaquete: empaque.contenidoPaquete,
         }),
         ...(stockMinimoNuevo !== undefined &&
-          stockMinimoNuevo !== null && { stockMinimo: stockMinimoNuevo.toString() }),
+          stockMinimoNuevo !== null && { stockMinimo: stockMinimoNuevo }),
         ...(costoUnitarioNuevo !== undefined && {
           costoUnitario:
-            costoUnitarioNuevo && !costoUnitarioNuevo.isNeg()
-              ? costoUnitarioNuevo.toString()
-              : null,
+            costoUnitarioNuevo && !costoUnitarioNuevo.isNeg() ? costoUnitarioNuevo : null,
         }),
         ...(cuerpo.activo !== undefined && { activo: Boolean(cuerpo.activo) }),
       },

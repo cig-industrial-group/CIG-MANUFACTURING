@@ -27,7 +27,7 @@ Dominios funcionales implementados en la versión 1.0.0:
 El sistema está diseñado para ejecutarse **en un solo servidor**, sin dependencias de
 infraestructura externa (sin servidor de base de datos, sin cola de mensajes, sin SMTP).
 Esa restricción no es una limitación accidental: es un requisito de despliegue autónomo
-(ver [ADR-001](./06-REGISTRO-DECISIONES-ARQUITECTONICAS%20%28ADR%29.md)).
+(ver [ADR-001](./adr/ADR-001-sqlite-sobre-postgresql.md)).
 
 **Convención de nomenclatura obligatoria:** el proyecto se nombra **CIG-MANUFACTURING**
 (mayúsculas); el nombre del sistema y del usuario de servicio es **cig-manufacturing**
@@ -72,7 +72,7 @@ de cualquier entidad referenciada.
 - Las eliminaciones lógicas pasan por la **Papelera** (`Papelera`), que es también un log
   inmutable: tras la purga, la fila sobrevive sin datos como bitácora histórica.
 - Los folios (`SecuenciaFolio`) son **monotónicos**: un folio emitido jamás se reutiliza,
-  aunque se elimine el registro que lo portaba (ver [ADR-003](./06-REGISTRO-DECISIONES-ARQUITECTONICAS%20%28ADR%29.md)).
+  aunque se elimine el registro que lo portaba (ver [ADR-003](./adr/ADR-003-folios-monotonicos-bitacoras-inmutables.md)).
 
 Consecuencia práctica para el desarrollador: **nunca** se escribe un `UPDATE` sobre
 `Movimiento`, `CorreccionMovimiento`, `Papelera` o `RestauracionBD` para "arreglar"
@@ -138,7 +138,7 @@ autónomo. Versiones verificadas en `package.json` (rama `main`):
   restauración en caliente del módulo Respaldo se apoya en `pg_restore`. La decisión
   original de la 1.x (motor embebido, ADR-001) quedó reemplazada; el razonamiento
   histórico y las alternativas descartadas se conservan en el
-  [registro de decisiones (ADR)](./06-REGISTRO-DECISIONES-ARQUITECTONICAS%20%28ADR%29.md).
+  [registro de decisiones (ADR)](./adr/00-INDICE.md).
 - **Prisma 6** con `prisma-client-js`: esquema declarativo en `prisma/schema.prisma`
   (fuente única del modelo de datos, ver
   [04-REFERENCIA-BASE-DATOS.md](./04-REFERENCIA-BASE-DATOS.md)), cliente tipado y
@@ -186,7 +186,7 @@ autónomo. Versiones verificadas en `package.json` (rama `main`):
 | [03-GUIA-DESARROLLO-NUEVOS-MODULOS.md](./03-GUIA-DESARROLLO-NUEVOS-MODULOS.md) | Protocolo paso a paso para integrar un módulo nuevo (ejemplo maestro: Proveedores). |
 | [04-REFERENCIA-BASE-DATOS.md](./04-REFERENCIA-BASE-DATOS.md) | Diccionario de datos completo y comportamientos especiales. |
 | [05-DESPLIEGUE-Y-OPERACION.md](./05-DESPLIEGUE-Y-OPERACION.md) | `deploy.sh`, operaciones diarias, restauración. |
-| [06-REGISTRO-DECISIONES-ARQUITECTONICAS (ADR).md](./06-REGISTRO-DECISIONES-ARQUITECTONICAS%20%28ADR%29.md) | El «¿por qué?» de las decisiones clave. |
+| [adr/](./adr/00-INDICE.md) | El «¿por qué?» de las decisiones clave: un archivo por decisión (ADR-001…ADR-010) más el índice. |
 
 Lectura mínima para un desarrollador nuevo: este documento, el 02 y el 03. Para
 operar producción: el 05. Para tocar el esquema de datos: el 04.

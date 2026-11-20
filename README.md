@@ -3,12 +3,28 @@
 > ⚖️ **AVISO LEGAL:** Copyright © 2026 Emmanuel Caballero De La Rosa. Todos los derechos reservados.  
 > Tijuana, Baja California, México. Este proyecto es propiedad privada y confidencial. Queda prohibida su reproducción, distribución o uso no autorizado sin permiso explícito por escrito.
 
-**Versión:** 2.2.0 — la versión vive únicamente en `package.json` ([Única Fuente de Verdad](#arquitectura-de-la-versión-única-fuente-de-verdad); estado actual: endurecimiento acumulado del arranque y la autenticación — fail-fast explícito ante `AUTH_SECRET` inválido en producción con `process.exit(1)` (TASK-STR-011, hallazgo H9), tiempos de login uniformes contra enumeración de cuentas (TASK-STR-010) — sobre la base **PostgreSQL 16** obligatoria, decisión ADR-009). Registro de cambios: [CHANGELOG.md](./CHANGELOG.md). Si actualizas desde la v1.1.1, sigue la [Guía de Migración](#guía-de-migración-desde-v111-sqlite).
+---
 
-Sistema web bilingüe (Español / Inglés) para el control y la gestión de almacén de fábrica:
-inventario multi-almacén, entradas, recepción de materia prima, salidas, traslados, ajustes,
-historial de movimientos con bitácora de correcciones, códigos QR, y administración de
-usuarios, roles y permisos.
+## Descripción ejecutiva
+
+CIG-MANUFACTURING es un sistema web bilingüe (Español / Inglés) para el control y la
+gestión de almacén de fábrica: inventario multi-almacén, entradas, recepción de materia
+prima, salidas, traslados, ajustes y scrap, historial de movimientos tipo ledger con
+bitácora de correcciones inmutable, folios monotónicos, calidad de salida (OQC) con
+liberaciones agrupadas a clientes, y administración de usuarios, roles y permisos
+granulares.
+
+El sistema está diseñado con mentalidad de planta: **resiliencia operativa**
+(restauración en caliente con ventana de reversión, respaldos automáticos), **auditabilidad
+forense** (toda corrección y eliminación queda registrada de forma inmutable, con
+snapshots que sobreviven a la eliminación de las entidades) e **integridad de datos
+exacta** (las cantidades y costos viven en `NUMERIC` nativo de PostgreSQL — jamás
+punto flotante). La arquitectura de seguridad se rige por Fail-Fast, Defensa en
+Profundidad y minimización de superficie de ataque.
+
+**Versión:** 2.3.0 — la versión vive únicamente en `package.json`
+([Única Fuente de Verdad](#arquitectura-de-la-versión-única-fuente-de-verdad)).
+Registro de cambios: [CHANGELOG.md](./CHANGELOG.md).
 
 ---
 
@@ -16,201 +32,209 @@ usuarios, roles y permisos.
 
 | Módulo | Descripción |
 |---|---|
-| **Autenticación** | Inicio de sesión con correo/contraseña, sesiones JWT en cookie httpOnly (24 h), recuperación de contraseña por código, autoregistro configurable, cambio de contraseña. |
-| **Almacén** | Catálogo de productos (SKU, categoría, unidad, stock mínimo, costo), gestión de almacenes, inventario consolidado y por almacén, alertas de stock mínimo. |
-| **Movimientos** | Entradas, recepción de materia prima, salidas, traslados entre almacenes, ajustes y scrap; folio automático por tipo (ENT/REC/SAL/TRA/AJU/SCR) con snapshot de stock resultante. Series **monotónicas** (`SecuenciaFolio`): un folio emitido jamás se reutiliza, aunque se elimine el registro que lo portaba. |
-| **Correcciones** | Edición y eliminación de movimientos con bitácora inmutable (`CorreccionMovimiento`) que conserva el estado anterior y el motivo. Contrato explícito: un campo no enviado se conserva y una cadena vacía lo limpia — ninguna corrección parcial puede borrar por accidente la remisión (PL) o el responsable. |
-| **Eliminación de registros (papelera)** | Tres niveles en productos, almacenes, modelos, números de parte y usuarios: **desactivar / reactivar** (reversible, queda oculto de las nuevas operaciones), **eliminar** (el registro sale de la base y va a la **Papelera** con un snapshot completo: restaurable durante 30 días, con cuenta regresiva) y **purga** (manual o automática al expirar: definitiva e irrecuperable). Cada eliminación, restauración y purga queda en una **bitácora inmutable** para siempre. |
-| **Historial tipo ledger** | Los movimientos son registros inmutables autodescriptivos: conservan snapshots del producto (SKU/nombre/unidad), almacenes y usuario al momento del registro, con referencias suaves que sobreviven a cualquier eliminación. Si un producto se restaura desde la papelera, su historial se re-vincula solo. Los movimientos de entidades eliminadas quedan congelados (no editables) y se marcan con un distintivo «Eliminado». |
-| **Catálogo** | Modelos de equipo/producto y números de parte con asociación muchos-a-muchos: una parte puede pertenecer a varios modelos y un modelo agrupa varias partes. Búsqueda, asociación desde ambas vistas y filtro «Mostrar inactivos». |
-| **Clientes** | Catálogo de clientes de la empresa (código, razón social, contacto, correo, teléfono, dirección, notas) con activación/desactivación y eliminación en dos etapas (papelera). |
-| **Códigos QR** | Generación de etiquetas QR por producto/almacén para consulta rápida de inventario. |
-| **OQC (Calidad de Salida)** | Liberación de material a clientes: toda la operación se agrupa bajo **un folio de salida único** (OQC-…) con una partida (movimiento SALIDA) por producto. El inspector puede **corregir una partida individual** (la remisión/PL y el responsable siempre reflejan la cabecera de la salida) o **eliminarla** (devuelve el material con bitácora), **editar la cabecera** de la salida — la remisión y el responsable se propagan a todas las partidas y quedan en la bitácora como «Edición de cabecera» — y **eliminar la salida completa** (revierte todo el stock, con bitácora por partida). La bitácora se liga a la salida por `salidaId` (clave estable): las correcciones de partidas eliminadas siguen siendo visibles y una liberación nueva jamás hereda correcciones ajenas. Registro de **scrap** (descuenta stock mediante movimiento SCRAP con el mismo folio, corregible/eliminable con bitácora) y de **rechazos** de inspección (documental, sin efecto en stock, con disposición: pendiente/retrabajo/scrap/liberado). |
-| **Usuarios y roles** | 6 roles precargados (ADMIN, TI, JEFE_ALMACEN, ALMACENERO, OPERADOR, OQC) con permisos granulares editables desde la app. |
-| **Ajustes** | Habilitar/deshabilitar registro público y recuperación de contraseña; rol asignado al autoregistro. |
-| **Respaldo y Restauración** | Copias de seguridad completas de la base de datos (`pg_dump --format=custom`: instantánea consistente sin detener la planta) y **restauración EN CALIENTE**: una única transacción reemplaza todos los datos sin reiniciar el servidor. Si la restauración falla a mitad de operación, PostgreSQL revierte todo y la base queda **exactamente como estaba** (rollback automático). Cada restauración exitosa crea un **snapshot pre-restauración** y abre una **ventana de 24 horas** para revertirla desde la UI (la reversión es a su vez una restauración con su propia ventana). Incluye respaldo **automático diario** (al abrir el módulo, conserva los últimos 7), rotación/limpieza de snapshots, detección de archivos copiados manualmente a `DATA_DIR/backups/`, descarga de respaldos, validación de integridad y compatibilidad de esquema del volcado (`pg_restore --list`) antes de restaurar, y bitácora completa de intentos (`RestauracionBD`). |
+| **Autenticación** | Sesión con correo/contraseña, JWT en cookie httpOnly (24 h), recuperación por código, autoregistro configurable, cambio de contraseña con revocación de sesiones. |
+| **Almacén** | Catálogo de productos (SKU, categoría, unidad, empaque de conteo, stock mínimo, costo), almacenes, inventario consolidado y por almacén, alertas de stock mínimo, códigos QR. |
+| **Movimientos** | Entradas, recepciones, salidas, traslados, ajustes y scrap con folio por tipo (ENT/REC/SAL/TRA/AJU/SCR) y snapshot del stock resultante. Series **monotónicas** (`SecuenciaFolio`): un folio jamás se reutiliza. |
+| **Correcciones** | Edición y eliminación de movimientos con bitácora inmutable (`CorreccionMovimiento`): estado anterior, corregido y motivo. Contrato explícito: campo no enviado se conserva; cadena vacía limpia. |
+| **Papelera (3 niveles)** | Desactivar/reactivar (reversible) → eliminar (snapshot completo, restaurable 30 días) → purgar (definitivo, bitácorado). Cada operación queda en bitácora inmutable. |
+| **Historial tipo ledger** | Movimientos autodescriptivos con snapshots de producto/almacenes/usuario; referencias suaves que sobreviven a cualquier eliminación. Los movimientos de entidades eliminadas quedan congelados y marcados. |
+| **OQC (Calidad de Salida)** | Liberación agrupada bajo un folio único (OQC-…) con una partida por producto; corrección/eliminación de partidas individuales o de la salida completa con reversión de stock y bitácora. Registro de **scrap** (descuenta stock con el mismo folio) y de **rechazos** (documental, con disposición). |
+| **Clientes / Catálogo** | Catálogo de clientes y de modelos/números de parte con asociación N:M. |
+| **Usuarios y roles** | 6 roles precargados con 19 permisos granulares editables. |
+| **Respaldo y restauración** | `pg_dump --format=custom`, restauración **en caliente** transaccional (una transacción o nada), snapshot pre-restauración con ventana de reversión de 24 h, respaldo automático diario (rota 7), bitácora de intentos. |
 | **Bilingüe** | Interfaz completa ES/EN con selector de idioma. |
 
-## Permisos del sistema
+## Arquitectura de seguridad y cumplimiento
 
-`almacen.ver` · `almacen.gestionar` · `movimientos.crear` · `movimientos.corregir` ·
-`inventario.ajustar` · `catalogo.ver` · `catalogo.gestionar` · `clientes.ver` ·
-`clientes.gestionar` · `oqc.ver` · `oqc.liberar` · `oqc.gestionar` · `usuarios.gestionar` ·
-`ajustes.gestionar` · `respaldo.gestionar` · `papelera.ver` · `papelera.gestionar`
+El diseño se alinea con controles de referencia de seguridad industrial y se documenta
+en la suite de [Decisiones Arquitectónicas (ADR)](./docs/adr/00-INDICE.md):
 
-## Usuarios iniciales
+| Marco | Aplicación en este sistema |
+|---|---|
+| **ISO/IEC 27001:2022** (A.8.15, A.8.28, A.8.29) | Integridad de datos en reposo: dominio numérico impuesto por el motor (`NUMERIC(15,6)/(15,4)`, [ADR-010](./docs/adr/ADR-010-migracion-directa-a-numeric.md)). Bitácoras inmutables de corrección y eliminación. Secretos solo por entorno (12-Factor: `AUTH_SECRET`, `DATABASE_URL`, `DATA_DIR`). |
+| **NIST SP 800-53** (SI-10, SC-28, AU, AC) | Validación estricta de entrada en toda frontera HTTP, fail-closed (`aDecimal`, tipos nominales de `tipos-dominio.ts`). Dominio numérico en reposo. Eventos auditados (bitácoras, respaldo/restauración). Control de acceso por permiso granular en cada ruta (`requerirPermiso`, ADR-004). |
+| **OWASP ASVS** | Sesiones JWT en cookie `httpOnly`/`SameSite=Strict` (ADR-007) con revocación por cambio de contraseña. Hash bcrypt. Límite de intentos de login anti-fuerza bruta con confianza de proxy explícita (fail-closed). Cabeceras de seguridad globales con nonce por petición. |
+| **Resistencia operativa** | Reintentos ante SQLSTATE transitorios con retroceso acotado (ADR-006). Transacciones Serializable para la autoridad de folios. Restauración en caliente transaccional con ventana de reversión. |
 
-La instalación crea **una única cuenta administradora** (`admin@cig-manufacturing.com`)
-la primera vez que se siembra una base de datos vacía. Su contraseña **nunca está
-fijada en el repositorio**:
+**Invariantes estructurales** (no negociables, documentadas en sus ADRs):
 
-- Si ejecutas la instalación con `ADMIN_PASSWORD='TuClave123' ./setup.sh`, esa es la
-  contraseña inicial del administrador.
-- Si no la defines, se genera una **aleatoria** y queda escrita (una sola vez,
-  permisos 600) en `DATA_DIR/credenciales-iniciales.txt`.
+- **Folios monotónicos** (ADR-003): la serie jamás reutiliza un número.
+- **Ledger inmutable**: los movimientos no se editan «en sitio»; toda corrección crea bitácora con antes/después/motivo.
+- **Papelera de tres niveles**: desactivar → eliminar (30 días restaurable) → purgar (bitácorado, definitivo).
+- **Integridad numérica exacta** (ADR-010): `Decimal` de Prisma sobre `NUMERIC` de PostgreSQL; `Float`/`Real` prohibidos para cantidades, costos o medidas.
 
-> ⚠️ **Cambia la contraseña en el primer inicio de sesión** (el sistema te lo
-> pedirá) y elimina `credenciales-iniciales.txt` después. Las cuentas adicionales
-> (TI, almaceneros, operadores) se crean desde la aplicación una vez entras como
-> administrador.
+---
 
 ## Pila tecnológica
 
-- **Next.js 16** (App Router, salida `standalone`) + **React 19** + **TypeScript**
-- **Prisma ORM** con **PostgreSQL 16+** (servidor de base de datos obligatorio; `deploy.sh`, `setup.sh` y `docker-compose.yml` lo aprovisionan)
+- **Next.js 16** (App Router, salida `standalone`) · **React 19** · **TypeScript**
+- **Prisma ORM** sobre **PostgreSQL 16+** (obligatorio; `deploy.sh`/`setup.sh`/`docker-compose.yml` lo aprovisionan) — campos numéricos nativos `NUMERIC` (ADR-010)
 - **Tailwind CSS 4** + componentes **shadcn/ui**
-- **jose** (JWT) + **bcryptjs** (hash de contraseñas)
-- **React Query**, **React Table**, **Recharts**, **react-qr-code**
+- **jose** (JWT) · **bcryptjs** (hash de contraseñas)
+- **React Query** · **React Table** · **Recharts** · **react-qr-code**
+- Pruebas: **Vitest** (núcleo numérico y saneadores) · scripts E2E por módulo
+- Runtime: **Bun** (build, pruebas y operación; Node 24 también soportado)
+
+---
+
+## Integridad de datos: `NUMERIC` nativo (ADR-010)
+
+Desde la v2.3.0 las cantidades, costos y medidas persisten como **`Decimal` de Prisma
+sobre `NUMERIC` de PostgreSQL** — la era «decimal como texto» quedó cerrada:
+
+| Modelo | Columnas | Tipo |
+|---|---|---|
+| `Stock` | `cantidad` | `NUMERIC(15,6)` |
+| `Movimiento` | `cantidad`, `cantidadDespues` | `NUMERIC(15,6)` (firmado para ajustes) |
+| `Producto` | `stockMinimo`, `contenidoPaquete` | `NUMERIC(15,6)` |
+| `Producto` | `costoUnitario` | `NUMERIC(15,4)` (práctica contable) |
+| `RegistroScrap`, `RegistroRechazo` | `cantidad` | `NUMERIC(15,6)` |
+
+La decisión ([ADR-010](./docs/adr/ADR-010-migracion-directa-a-numeric.md)) descansa
+sobre tres pilares: la **base —no solo la aplicación— impone el dominio** (una escritura
+externa fuera de dominio es rechazada por el motor: NIST SI-10/SC-28, ISO A.8.15); la
+**agregación nativa** (`SUM` y rangos operan en SQL sin arrastrar filas a la app); y la
+**frontera única** (15 enteros / 6 decimales, replicada por `aDecimal` en la entrada
+HTTP). `src/lib/numerico.ts` sigue siendo la única fuente de aritmética — exacta, sin
+épsilon — y el contrato JSON es estable: `Prisma.Decimal` se serializa a `string`, de
+modo que **el frontend no requiere cambio alguno**.
+
+---
 
 ## Estructura del proyecto
 
 ```
 cig-manufacturing/
 ├── prisma/
-│   ├── schema.prisma        # Modelo de datos (21 modelos)
+│   ├── schema.prisma        # Modelo de datos (21 modelos; numéricos NUMERIC)
+│   ├── migrations/          # Historial auditable de esquema
 │   └── seed.ts              # Semilla: roles, configuración y admin inicial
-├── db/                      # DATA_DIR por omisión: respaldos, branding y credenciales
-│   └── backups/             #   volcados pg_dump (.dump); la BD vive en el servidor PostgreSQL
+├── docs/
+│   ├── adr/                 # Decisiones Arquitectónicas (ADR-001…010 + índice)
+│   ├── 01…05                # Introducción, arquitectura, guía de módulos,
+│   │                        # referencia de BD y despliegue/operación
+│   └── compliance/          # Informes de validación y evidencia de auditoría
+├── db/                       # DATA_DIR por omisión: respaldos, branding, credenciales
 ├── src/
-│   ├── app/                 # Páginas y rutas API (App Router)
-│   │   └── api/             # auth/, usuarios/, roles/, almacen/, ajustes/
-│   ├── components/ui/       # Componentes shadcn/ui
-│   ├── modulos/             # Lógica por módulo de negocio
-│   │   ├── autenticacion/   # Sesión, permisos, pantalla de acceso
-│   │   ├── almacen/         # Productos, almacenes, inventario, movimientos, QR
-│   │   ├── catalogo/        # Modelos y números de parte (asociación N:M)
-│   │   ├── clientes/        # Catálogo de clientes
-│   │   ├── oqc/             # Calidad de salida: liberaciones, scrap, rechazos
-│   │   ├── usuarios/        # Gestión de usuarios y roles
-│   │   ├── ajustes/         # Ajustes del sistema
-│   │   ├── nucleo/          # Registro de módulos y panel principal
-│   │   └── compartidos/     # Idioma ES/EN, errores, UI compartida
-│   ├── hooks/               # use-toast, use-mobile
-│   └── lib/                 # Cliente Prisma, utilidades
-├── scripts/
-│   └── posbuild.mjs         # Copia static/ y public/ al standalone tras compilar
-├── setup.sh                 # Instalación completa en un paso
-├── start.sh                 # Arranque en producción
-├── Dockerfile               # Despliegue con Docker (opcional)
-└── docker-compose.yml       # Orquestación con Docker (opcional)
+│   ├── app/                  # Páginas y rutas API (App Router)
+│   ├── modulos/              # Lógica por módulo (autenticación, almacén, catálogo,
+│   │                         # clientes, oqc, usuarios, ajustes, unidades, papelera,
+│   │                         # respaldo, compartidos, nucleo)
+│   ├── components/ui/        # Componentes shadcn/ui
+│   ├── hooks/                # use-toast, use-mobile
+│   └── lib/                  # numerico.ts (integridad numérica), db, reintentos,
+│                             # tipos-dominio, version
+├── scripts/                  # Siembra, migraciones auxiliares, pruebas de humo y E2E
+├── setup.sh                  # Instalación completa en un paso
+├── deploy.sh                 # Despliegue de producción (Ubuntu 22.04)
+├── start.sh                  # Arranque en producción
+├── Dockerfile                # Despliegue con Docker (opcional)
+└── docker-compose.yml        # Orquestación con Docker (opcional)
 ```
 
-## Inicio rápido
+---
 
-> **Requisito obligatorio:** PostgreSQL 16+ accesible en local. `setup.sh` aprovisiona
-> el rol y la base de datos (si no puede, escribe `instrucciones-postgres.txt` con el
-> SQL exacto para ejecutar como administrador).
+## Despliegue rápido
+
+> **Requisito obligatorio:** PostgreSQL 16+ accesible. `deploy.sh` y `setup.sh` lo
+> aprovisionan (PGDG); si no pueden, escriben el SQL exacto para ejecutar como
+> administrador (`instrucciones-postgres.txt`).
+
+**Producción (Ubuntu 22.04, una máquina):**
 
 ```bash
-./setup.sh     # configura .env (AUTH_SECRET aleatorio + DATABASE_URL + DATA_DIR), instala, crea BD, siembra y compila
-./start.sh     # levanta el servidor en producción (puerto 3000)
+sudo ./deploy.sh    # PostgreSQL 16 + rol + BD + migraciones + build + systemd + Caddy
+```
+
+**Primera instalación local / VM de prueba:**
+
+```bash
+./setup.sh     # .env (AUTH_SECRET aleatorio + DATABASE_URL + DATA_DIR), instala, crea BD, siembra y compila
+./start.sh     # servidor en producción (puerto 3000)
 ```
 
 > Para fijar la contraseña del administrador inicial:
-> `ADMIN_PASSWORD='TuClave123' ./setup.sh` (solo tiene efecto la primera vez,
-> con la base de datos vacía).
+> `ADMIN_PASSWORD='TuClave123' ./setup.sh` (solo la primera vez, con la base vacía).
+> Sin ella, se genera una aleatoria (144 bits) y queda escrita UNA VEZ con permisos
+> 600 en `DATA_DIR/credenciales-iniciales.txt`; el sistema exige cambiarla en el
+> primer acceso.
 
-**Seguridad del arranque:** `AUTH_SECRET` es obligatorio en producción (mínimo
-32 caracteres, generado por `setup.sh`). Si falta o es inválido, la aplicación
-**no inicia**: `src/instrumentation.ts` registra la causa por consola (nunca el
-valor del secreto) y **termina el proceso con `process.exit(1)` (fail-fast
-explícito, TASK-STR-011/H9)** — el servidor jamás queda «vivo» en un estado
-degradado sirviendo HTTP 500; docker/systemd ven el código de salida 1 como
-arranque fallido y lo reinician/escalan. En desarrollo solo se advierte y se
-genera un secreto efímero aleatorio. Ver [`.env.example`](./.env.example).
+**Seguridad del arranque (Fail-Fast):** `AUTH_SECRET` es obligatorio en producción
+(mínimo 32 caracteres). Si falta o es inválido, la aplicación **no inicia**:
+`src/instrumentation.ts` registra la causa (nunca el valor del secreto) y el proceso
+termina con `process.exit(1)` — el servidor jamás queda «vivo» en estado degradado;
+systemd/Docker ven el código 1 y escalan. En desarrollo solo se advierte y se genera
+un secreto efímero.
 
-La guía completa de despliegue de producción (Ubuntu 22.04 con `deploy.sh`, TLS vía
-Cloudflare DNS-01, systemd, Caddy, Docker, respaldos y solución de problemas) está en
-**[docs/05-DESPLIEGUE-Y-OPERACION.md](./docs/05-DESPLIEGUE-Y-OPERACION.md)** y
-**[README-DEPLOY.md](./README-DEPLOY.md)**.
+La guía operativa completa (systemd, TLS vía Cloudflare DNS-01, Caddy, Docker,
+respaldo/restauración, solución de problemas) está en
+[docs/05-DESPLIEGUE-Y-OPERACION.md](./docs/05-DESPLIEGUE-Y-OPERACION.md) y
+[README-DEPLOY.md](./README-DEPLOY.md).
+
+---
 
 ## Desarrollo
 
 ```bash
 bun install        # o npm install
-bun run dev        # o npm run dev  → http://localhost:3000
+bun run dev        # http://localhost:3000
 ```
 
-En desarrollo, si no defines `AUTH_SECRET`, se usa un secreto efímero aleatorio
-por proceso (las sesiones se pierden al reiniciar; nunca un valor conocido).
+Variables de entorno: [`.env.example`](./.env.example).
 
-Variables de entorno: ver [`.env.example`](./.env.example).
-
-**Para desarrollar e integrar un módulo nuevo** (base de datos, permisos, API,
-lógica, UI y pruebas, paso a paso con código de referencia), sigue la guía
-**[docs/03-GUIA-DESARROLLO-NUEVOS-MODULOS.md](./docs/03-GUIA-DESARROLLO-NUEVOS-MODULOS.md)**.
-La arquitectura general del sistema está documentada en
-[docs/02-ARQUITECTURA-DEL-SISTEMA.md](./docs/02-ARQUITECTURA-DEL-SISTEMA.md).
+Para desarrollar un módulo nuevo (base de datos, permisos, API, lógica, UI y pruebas,
+paso a paso): [docs/03-GUIA-DESARROLLO-NUEVOS-MODULOS.md](./docs/03-GUIA-DESARROLLO-NUEVOS-MODULOS.md).
+Arquitectura general: [docs/02-ARQUITECTURA-DEL-SISTEMA.md](./docs/02-ARQUITECTURA-DEL-SISTEMA.md).
 
 ### Pruebas
 
 ```bash
-bash scripts/simulacion-ci.sh                     # réplica local del pipeline de CI
-npm run test                                      # pruebas unitarias (Vitest, núcleo numérico)
+bash scripts/simulacion-ci.sh                           # réplica local del pipeline de CI
+bun run test                                            # unitarias (Vitest)
 ADMIN_PASSWORD='...' python3 scripts/test-clientes.py   # E2E del módulo Clientes
-# (los demás scripts de scripts/ aceptan igualmente ADMIN_PASSWORD)
 ```
+
+---
 
 ## Arquitectura de la versión (Única Fuente de Verdad)
 
-Desde la v2.1.0, la versión del sistema vive **exclusivamente** en el campo
-`version` de [`package.json`](./package.json). El resto del sistema la lee de
-ahí — **nunca se escribe a mano** en componentes, rutas, scripts o
-documentación vigente:
+La versión vive **exclusivamente** en el campo `version` de
+[`package.json`](./package.json). El resto del sistema la lee de ahí — nunca se
+escribe a mano en componentes, rutas, scripts o documentación vigente:
 
 | Consumidor | Cómo obtiene la versión |
 |---|---|
-| Rutas API y Server Components | Importan `VERSION_DEL_SISTEMA` / `ETIQUETA_VERSION_SISTEMA` de [`src/lib/version.ts`](./src/lib/version.ts) (p. ej. el health check `GET /api` responde `{ estado, sistema, version }`). |
-| Client Components (pies de página, pantalla de acceso) | Reciben `versionDelSistema` como **prop** desde el Server Component raíz (`src/app/page.tsx`); así no se empaqueta `package.json` en el navegador. |
-| `deploy.sh` | Lee `package.json` en tiempo de ejecución (`sed`) para sus banners y para el encabezado de la unidad systemd. |
+| Rutas API / Server Components | `VERSION_DEL_SISTEMA` / `ETIQUETA_VERSION_SISTEMA` de [`src/lib/version.ts`](./src/lib/version.ts). |
+| Client Components | Prop `versionDelSistema` desde el Server Component raíz (no se empaqueta `package.json` en el navegador). |
+| `deploy.sh` | Lee `package.json` en tiempo de ejecución (`sed`) para banners y la unidad systemd. |
 
-**Para liberar una nueva versión**: cambia el campo `version` de
-`package.json`, añade la entrada correspondiente en `CHANGELOG.md` y el resto
-del sistema (UI, health check, banners de despliegue) se actualiza solo.
+**Para liberar una versión**: cambia `version` en `package.json`, añade la entrada en
+`CHANGELOG.md`; UI, health check y banners se actualizan solos.
+
+---
 
 ## Modelo de datos (resumen)
 
-La base de datos vive en un **servidor PostgreSQL 16** y tiene **21 modelos** definidos en
-[`prisma/schema.prisma`](./prisma/schema.prisma): autenticación (`Rol`, `Usuario`,
-`Restablecimiento`, `Configuracion`), almacén (`Almacen`, `Producto`, `Stock`,
-`Movimiento`, `CorreccionMovimiento`, `SecuenciaFolio`), unidades (`UnidadMedida`),
-catálogo técnico (`Modelo`, `NumeroParte`, `ModeloParte`), clientes (`Cliente`),
-calidad de salida (`SalidaOQC`, `RegistroScrap`, `RegistroRechazo`), papelera
-(`Papelera`) y respaldo (`RespaldoBD`, `RestauracionBD`).
+21 modelos en [`prisma/schema.prisma`](./prisma/schema.prisma): autenticación
+(`Rol`, `Usuario`, `Restablecimiento`, `Configuracion`), almacén (`Almacen`,
+`Producto`, `Stock`, `Movimiento`, `CorreccionMovimiento`, `SecuenciaFolio`),
+unidades (`UnidadMedida`), catálogo técnico (`Modelo`, `NumeroParte`, `ModeloParte`),
+clientes (`Cliente`), calidad de salida (`SalidaOQC`, `RegistroScrap`,
+`RegistroRechazo`), papelera (`Papelera`) y respaldo (`RespaldoBD`, `RestauracionBD`).
 
-**El diccionario de datos completo** — campo por campo, con los comportamientos
-especiales (folios monotónicos, papelera de 3 niveles, snapshots inmutables,
-restauración en caliente) — está en
-**[docs/04-REFERENCIA-BASE-DATOS.md](./docs/04-REFERENCIA-BASE-DATOS.md)**.
+El diccionario completo (campo por campo y comportamientos especiales) está en
+[docs/04-REFERENCIA-BASE-DATOS.md](./docs/04-REFERENCIA-BASE-DATOS.md).
 
-## Guía de Migración desde v1.1.1 (SQLite)
+---
 
-> Esta es la **única sección** de la documentación vigente que referencia el motor
-> anterior: la serie 1.x usaba SQLite embebido; desde la 2.0.0 el requisito
-> obligatorio es **PostgreSQL 16+** (ADR-009).
+## Gestión de versiones (SemVer 2.0.0)
 
-Si actualizas una instalación existente de la v1.1.1:
-
-1. Instala y arranca **PostgreSQL 16** (en despliegues con `deploy.sh` el propio
-   instalador lo aprovisiona desde PGDG; con Docker, usa el servicio
-   `postgres:16-alpine` del `docker-compose.yml`).
-2. Despliega la versión actual (v2.2.0): `deploy.sh` crea rol, base y esquema
-   (migraciones auditables) y conserva tu `.env` en re-ejecuciones.
-3. Migra los datos del archivo de la instalación anterior:
-
-   ```bash
-   bun run scripts/migrar-sqlite-a-postgres.ts /ruta/a/production.db
-   ```
-
-   La copia es **transaccional y verificada** (21 tablas, conteos por tabla, cero
-   discrepancias o aborta) y conserva folios monotónicos, papelera con su ventana
-   de 30 días, snapshots del histórico y bitácoras.
-
-4. Verifica el resultado con la prueba de humo:
-   `bun run scripts/prueba-humo-postgres.ts`.
-
-La guía operativa completa para instalaciones de producción está en
-[README-DEPLOY.md § 8](./README-DEPLOY.md#8-migración-de-una-instalación-desde-v111-sqlite).
+- **2.3.0** — migración directa del esquema numérico a `NUMERIC` (ADR-010) y
+  reestructuración de la documentación ADR. Aditivo a nivel de contrato JSON;
+  refactorización estructural de la base de datos.
+- Serie **2.x** — PostgreSQL 16 obligatorio (ADR-009); endurecimiento acumulado de
+  autenticación y arranque.
+- Serie **1.x** — era SQLite (retirada; ver [ADR-001](./docs/adr/ADR-001-sqlite-sobre-postgresql.md)).
 
 ## Licencia
 

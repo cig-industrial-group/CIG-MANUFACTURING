@@ -9,30 +9,38 @@
  */
 
 /**
- * NÚCLEO DE INTEGRIDAD NUMÉRICA (remediación Fase 1)
- * ==================================================
+ * NÚCLEO DE INTEGRIDAD NUMÉRICA (ADR-010, v2.3.0)
+ * ================================================
  *
  * ÚNICA fuente de aritmética para cantidades de inventario, costos y
- * medidas del sistema. Las columnas persisten como TEXTO decimal exacto
- * (String en Prisma): el motor de archivo anterior carecía de DECIMAL
- * nativo y el mapeo Decimal de Prisma sobre él persistía REAL/float64
- * (verificado empíricamente: increment de 0.1 ×3 → 0.30000000000000004,
- * typeof = 'real'), lo que violaba la política de integridad numérica.
+ * medidas del sistema. Desde la v2.3.0 las columnas persisten como
+ * NUMERIC nativo de PostgreSQL (Decimal en Prisma): el dominio numérico
+ * lo impone el MOTOR, no solo la aplicación. La era «decimales como
+ * texto» — correcta para el motor SQLite (ADR-001), donde el mapeo
+ * Decimal persistía REAL/float64 (0.1 × 3 → 0.30000000000000004) —
+ * quedó cerrada con la migración directa (docs/adr/ADR-010).
+ *
+ * Responsabilidad (SRP): validar la ENTRADA (frontera HTTP), hacer la
+ * ARITMÉTICA EXACTA y serializar la SALIDA. Nada más — la persistencia
+ * es asunto del motor y del llamador.
  *
  * Reglas:
  *   · Prohibido Float/Double para cantidades, costos o medidas.
- *   · Toda entrada se valida con `aDecimal` (fail-closed: valor inválido
- *     → null → el llamador responde con su código de negocio).
- *   · Toda escritura a BD se hace con `texto(...)` (forma canónica).
+ *   · Toda entrada HTTP se valida con `aDecimal` (fail-closed: valor
+ *     inválido → null → el llamador responde con su código de negocio).
+ *   · Las lecturas de BD llegan como Prisma.Decimal (desdeBD tipa el
+ *     contrato; un null inesperado es un incidente, no un cero).
  *   · Toda comparación y suma es EXACTA (sin épsilon de tolerancia).
+ *   · El contrato JSON no cambia: Prisma.Decimal se serializa a string
+ *     (los componentes de React no requieren modificación alguna).
  *
  * Este módulo es SOLO SERVIDOR (importa el runtime de Prisma): los
  * componentes de cliente NO deben importarlo; usen los helpers
  * frontend-safe de @/modulos/unidades/tipos.
  *
- * Referencias: OWASP ASVS 5.4.1 (integridad de datos en tránsito/reposo),
- * NIST SP 800-53 SI-10 (validación de información), ISO 27001 A.8.28
- * (codificación segura).
+ * Referencias: OWASP ASVS 5.1 (validación de entrada) y 5.4 (integridad
+ * de datos), NIST SP 800-53 SI-10 (validación de información), ISO 27001
+ * A.8.28 (codificación segura).
  */
 import { Prisma } from "@prisma/client";
 
@@ -75,13 +83,16 @@ export function esDecimalTextual(valor: string): boolean {
 }
 
 /**
- * Convierte una entrada (texto o número) a Decimal EXACTO.
+ * Convierte una entrada (texto, número o Decimal ya existente) a Decimal
+ * EXACTO validado contra la frontera 15/6.
  *
  * Acepta números por compatibilidad con clientes que aún envían JSON
  * numérico: decimal.js los interpreta vía su representación textual corta
  * (String(0.1) = "0.1"), sin propagar artefactos binarios. Un número que
  * YA traiga artefactos (0.30000000000000004) excede la escala y se
- * rechaza: nunca se persiste corrupción heredada.
+ * rechaza: nunca se persiste corrupción heredada. Las instancias
+ * Prisma.Decimal (p. ej. lecturas de BD reutilizadas en un cuerpo de
+ * edición) se revalidan con la misma frontera.
  *
  * Devuelve null ante cualquier entrada inválida (el llamador decide el
  * código de error de negocio). Fail-closed.
@@ -108,20 +119,24 @@ export function aDecimal(valor: unknown): Decimal | null {
 }
 
 /**
- * Interpreta un valor persistido en la base (texto decimal) como Decimal.
- * Es la vía de lectura estándar tras cada findMany/findUnique. Un valor
- * corrupto (escrito fuera del sistema) lanza Error: es un incidente de
- * integridad que NO se enmascara (defensa en profundidad).
+ * Tipa un valor leído de la base: desde la v2.3.0 las columnas numéricas
+ * SON NUMERIC, de modo que Prisma entrega Prisma.Decimal — esto es la
+ * frontera de lectura estándar tras cada findMany/findUnique.
+ *
+ * Un null donde el llamador espera un dato (columna obligatoria) es un
+ * incidente de integridad y lanza con el nombre del campo: no se
+ * enmascara como cero (defensa en profundidad; el motor ya rechazó todo
+ * valor fuera de dominio, así que esto solo ocurre ante corrupción
+ * externa a la app).
  */
-export function desdeBD(valor: string, campo: string): Decimal {
-  try {
-    return new Prisma.Decimal(valor);
-  } catch {
+export function desdeBD(valor: Decimal | null | undefined, campo: string): Decimal {
+  if (valor === null || valor === undefined) {
     throw new Error(`VALOR_DECIMAL_CORRUPTO:${campo}`);
   }
+  return valor;
 }
 
-/** Serializa a texto canónico para persistir o responder por API ("2.50" → "2.5"). */
+/** Serializa a texto canónico para responder por API ("2.50" → "2.5"). */
 export function texto(d: Decimal | string): string {
   return (typeof d === "string" ? new Prisma.Decimal(d) : d).toString();
 }

@@ -79,20 +79,28 @@ export async function GET(request: Request) {
       const minimo = desdeBD(v.producto.stockMinimo, "Producto.stockMinimo");
       return v.producto.activo && minimo.isPositive() && v.unidades.lt(multiplicar(minimo, "1.1"));
     })
-    .map(([sku, v]) => ({
-      id: sku,
-      sku,
-      nombre: v.producto.nombre,
-      unidad: v.producto.unidad,
-      stockTotal: v.unidades.toString(),
-      stockMinimo: v.producto.stockMinimo,
-    }))
+    .map(([sku, v]) => {
+      const minimo = desdeBD(v.producto.stockMinimo, "Producto.stockMinimo");
+      return {
+        id: sku,
+        sku,
+        nombre: v.producto.nombre,
+        unidad: v.producto.unidad,
+        stockTotal: v.unidades.toString(),
+        stockMinimo: v.producto.stockMinimo,
+        // Solo para el ordenamiento exacto (no se serializa: Decimal
+        // interno del sort; ver comentario del sort).
+        unidades: v.unidades,
+        minimo,
+      };
+    })
     .sort((a, b) =>
-      // Razón stockTotal/stockMinimo con división Decimal (solo ordena la presentación)
-      desdeBD(a.stockTotal, "stockTotal")
-        .div(desdeBD(a.stockMinimo, "stockMinimo"))
-        .cmp(desdeBD(b.stockTotal, "stockTotal").div(desdeBD(b.stockMinimo, "stockMinimo"))),
+      // Razón stockTotal/stockMinimo con división Decimal exacta (solo
+      // ordena la presentación; ADR-010: la comparación usa el Decimal
+      // de origen, no el string serializado de la respuesta).
+      a.unidades.div(a.minimo).cmp(b.unidades.div(b.minimo)),
     )
+    .map(({ unidades, minimo, ...fila }) => fila)
     .slice(0, 8);
 
   // ===== Serie de actividad últimos 14 días =====
